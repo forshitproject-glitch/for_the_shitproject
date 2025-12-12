@@ -9,6 +9,7 @@
   html, body { height: 100%; margin: 0; padding: 0; }
   #app { height: 100%; display: flex; flex-direction: column; }
 
+  /* 上方 UI（不覆蓋地圖） */
   #uiBar{
     flex: 0 0 auto;
     padding: 10px 12px;
@@ -20,6 +21,7 @@
     gap: 10px;
   }
   #uiBar .title { font-weight: 700; font-size: 16px; }
+
   #timerBox {
     font-weight: 700; font-size: 16px;
     padding: 6px 10px; border-radius: 10px;
@@ -57,16 +59,16 @@
 </div>
 
 <script>
-/* ===== 鹿港中心與半徑（進入後才開始計時）===== */
-const LUKANG_CENTER = { lat: 24.056348, lng: 120.432589 };
+/* =========================
+   1) 鹿港範圍設定（可調）
+   ========================= */
+const LUKANG_CENTER = { lat: 24.056348, lng: 120.432589 }; // 鹿港老街附近
+const LUKANG_RADIUS_M = 3200;  // ✅ 包住整個鹿港：建議 3000~3500
+const DIM_OPACITY = 0.22;      // ✅ 變暗程度：越小越亮（0.18~0.25 好看）
 
-/*  改大：圈住整個鹿港（建議 2500~3500m） */
-const LUKANG_RADIUS_M = 3000; // 3km
-
-/*  亮度更高：遮罩更透明（建議 0.18~0.25） */
-const DIM_OPACITY = 0.22;
-
-/* ===== 景點資料 ===== */
+/* =========================
+   2) 景點資料
+   ========================= */
 const locations = [
   { name: "玻璃館", lat: 24.068667, lng: 120.395437 },
   { name: "鹿港老街", lat: 24.056348, lng: 120.432589 },
@@ -82,9 +84,12 @@ const locations = [
   { name: "摸乳巷", lat: 24.051817, lng: 120.432231 }
 ];
 
+/* =========================
+   3) 全域變數
+   ========================= */
 let map;
-let lukangCircle = null;
-let spotlightPolygon = null;
+let lukangCircle = null;       // 鹿港範圍圈（視覺輔助）
+let spotlightPolygon = null;   // 全區變暗 + 鹿港挖洞
 let userMarker = null;
 let watchId = null;
 
@@ -93,13 +98,18 @@ let timerInterval = null;
 let geofenceEntered = false;
 let remainingLocations = new Set(locations.map(l => l.name));
 
+/* =========================
+   4) UI helper
+   ========================= */
 function setStatus(msg) {
   document.getElementById("statusBox").textContent = "狀態：" + msg;
 }
 
-/* 不用 geometry 的圓形洞（近似足夠） */
-function makeCirclePathApprox(center, radiusMeters, points=160) {
-  const R = 6378137;
+/* =========================
+   5) 產生近似圓洞（不需要 geometry）
+   ========================= */
+function makeCirclePathApprox(center, radiusMeters, points = 180) {
+  const R = 6378137; // WGS84 地球半徑
   const lat0 = center.lat * Math.PI / 180;
   const lng0 = center.lng * Math.PI / 180;
   const d = radiusMeters / R;
@@ -108,16 +118,26 @@ function makeCirclePathApprox(center, radiusMeters, points=160) {
   for (let i = 0; i < points; i++) {
     const brng = (2 * Math.PI * i) / points;
 
-    const lat = Math.asin(Math.sin(lat0)*Math.cos(d) + Math.cos(lat0)*Math.sin(d)*Math.cos(brng));
-    const lng = lng0 + Math.atan2(Math.sin(brng)*Math.sin(d)*Math.cos(lat0), Math.cos(d)-Math.sin(lat0)*Math.sin(lat));
+    const lat = Math.asin(
+      Math.sin(lat0) * Math.cos(d) +
+      Math.cos(lat0) * Math.sin(d) * Math.cos(brng)
+    );
 
-    path.push({ lat: lat * 180/Math.PI, lng: lng * 180/Math.PI });
+    const lng = lng0 + Math.atan2(
+      Math.sin(brng) * Math.sin(d) * Math.cos(lat0),
+      Math.cos(d) - Math.sin(lat0) * Math.sin(lat)
+    );
+
+    path.push({ lat: lat * 180 / Math.PI, lng: lng * 180 / Math.PI });
   }
   return path;
 }
 
+/* =========================
+   6) 全區變暗 + 鹿港挖洞
+   ========================= */
 function buildSpotlight() {
-  // 外圈：覆蓋台灣附近（夠用）
+  // 外圈：包住台灣附近即可（避免用全世界造成你說的整個台灣都怪怪的）
   const outer = [
     { lat: 27.8, lng: 117.5 },
     { lat: 27.8, lng: 124.8 },
@@ -125,40 +145,48 @@ function buildSpotlight() {
     { lat: 20.0, lng: 117.5 }
   ];
 
-  const hole = makeCirclePathApprox(LUKANG_CENTER, LUKANG_RADIUS_M, 180);
+  // 內圈（洞）：鹿港圓洞
+  const hole = makeCirclePathApprox(LUKANG_CENTER, LUKANG_RADIUS_M, 220);
 
   spotlightPolygon = new google.maps.Polygon({
     map,
     paths: [outer, hole],
     fillColor: "#000000",
-    fillOpacity: DIM_OPACITY,  //  亮度：越小越亮（越不暗）
+    fillOpacity: DIM_OPACITY, // 越小越亮（越不暗）
     strokeOpacity: 0,
     clickable: false,
     zIndex: 2
   });
 }
 
+/* =========================
+   7) 鹿港範圍圈（一定看得見）
+   ========================= */
 function buildLukangCircle() {
   lukangCircle = new google.maps.Circle({
     map,
     center: LUKANG_CENTER,
     radius: LUKANG_RADIUS_M,
-    strokeColor: "#FF9800",
-    strokeOpacity: 0.9,
-    strokeWeight: 3,
-    fillColor: "#FF9800",
-    fillOpacity: 0.08,  // 圈內淡淡的色，不會白
+    strokeColor: "#FF5722",
+    strokeOpacity: 1,
+    strokeWeight: 4,
+    fillColor: "#FF5722",
+    fillOpacity: 0.06,
     clickable: false,
     zIndex: 3
   });
 }
 
+/* =========================
+   8) 初始化地圖
+   ========================= */
 function initMap() {
   map = new google.maps.Map(document.getElementById("map"), {
     center: LUKANG_CENTER,
-    zoom: 13  // 半徑變大，縮一點比較像「整個鹿港」
+    zoom: 13  // 範圍大，zoom 13 比較像整個鹿港
   });
 
+  // 景點 marker
   locations.forEach(loc => {
     loc.marker = new google.maps.Marker({
       position: { lat: loc.lat, lng: loc.lng },
@@ -170,15 +198,21 @@ function initMap() {
   buildSpotlight();
   buildLukangCircle();
 
-  setStatus("地圖已載入：進入鹿港範圍（橘圈）後才開始計時");
+  setStatus("地圖已載入：啟用定位後，進入鹿港範圍才會開始計時");
 }
 
+/* =========================
+   9) 回到鹿港
+   ========================= */
 function recenterToLukang() {
   map.setCenter(LUKANG_CENTER);
   map.setZoom(13);
   setStatus("已回到鹿港中心");
 }
 
+/* =========================
+   10) 啟用/略過定位
+   ========================= */
 function startGeolocation() {
   document.getElementById("btnStart").disabled = true;
   document.getElementById("btnSkip").disabled = true;
@@ -204,6 +238,9 @@ function skipGeolocation() {
   setStatus("已進入僅瀏覽模式（不計時、不追蹤位置）");
 }
 
+/* =========================
+   11) 定位回呼
+   ========================= */
 function onLocationError(err) {
   recenterToLukang();
   setStatus("定位失敗，已改為僅瀏覽");
@@ -230,6 +267,7 @@ function onLocationUpdate(position) {
     userMarker.setPosition(userPos);
   }
 
+  // 進入鹿港範圍後才開始計時
   const dist = getDistance(userPos.lat, userPos.lng, LUKANG_CENTER.lat, LUKANG_CENTER.lng);
 
   if (!geofenceEntered) {
@@ -247,6 +285,9 @@ function onLocationUpdate(position) {
   }
 }
 
+/* =========================
+   12) 景點接近判斷
+   ========================= */
 function checkProximity(userPos) {
   locations.forEach(loc => {
     if (!remainingLocations.has(loc.name)) return;
@@ -266,6 +307,9 @@ function checkProximity(userPos) {
   });
 }
 
+/* =========================
+   13) 距離計算（Haversine）
+   ========================= */
 function getDistance(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -276,6 +320,9 @@ function getDistance(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
+/* =========================
+   14) 計時器
+   ========================= */
 function startTimer() {
   if (startTime) return;
   startTime = Date.now();
