@@ -8,14 +8,13 @@
 <style>
   html, body { height: 100%; margin: 0; padding: 0; }
 
-  /* 用 flex 把 UI 與地圖分開：上面 UI、下面地圖 */
   #app {
     height: 100%;
     display: flex;
     flex-direction: column;
   }
 
-  /* 上方 UI 區（不覆蓋地圖） */
+  /* 上方 UI（不覆蓋地圖） */
   #uiBar {
     flex: 0 0 auto;
     padding: 10px 12px;
@@ -59,19 +58,18 @@
   .cancel-btn { background: #e0e0e0; }
   .reset-btn { background: #1565c0; color: #fff; }
 
-  /* 地圖區 */
   #map {
     flex: 1 1 auto;
     width: 100%;
   }
 </style>
 
-<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC9yd5GeV-J0SHVtpkeHvtFfSryaavAKIE"></script>
+<!-- 注意：加上 libraries=geometry 才能用 computeOffset -->
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC9yd5GeV-J0SHVtpkeHvtFfSryaavAKIE&libraries=geometry"></script>
 </head>
 
 <body>
 <div id="app">
-  <!-- UI 不覆蓋地圖，永遠看得到 -->
   <div id="uiBar">
     <div class="title">定位與計時</div>
 
@@ -87,9 +85,9 @@
 </div>
 
 <script>
-/* ===== 基本設定（鹿港中心 & 光圈）===== */
+/* ===== 鹿港中心與範圍（進入後才開始計時）===== */
 const LUKANG_CENTER = { lat: 24.056348, lng: 120.432589 }; // 鹿港老街附近
-const LUKANG_CIRCLE_RADIUS_M = 900; // 光圈半徑（公尺）你可調：500/800/1200...
+const LUKANG_RADIUS_M = 900; // 你要的「鹿港範圍」半徑（公尺）。可調：500/800/1200...
 
 /* ===== 景點資料 ===== */
 const locations = [
@@ -108,35 +106,66 @@ const locations = [
 ];
 
 let map;
-let lukangCircle = null;     // 鹿港光圈（你說的那個）
-let userMarker = null;       // 使用者位置點
-let watchId = null;          // watchPosition id
+let spotlightPolygon = null; // 「台灣變暗 + 鹿港挖洞」
+let userMarker = null;
+let watchId = null;
 
 let startTime = null;
 let timerInterval = null;
+let geofenceEntered = false; // 進入鹿港範圍後才 true
 let remainingLocations = new Set(locations.map(loc => loc.name));
 
 function setStatus(msg) {
   document.getElementById("statusBox").textContent = "狀態：" + msg;
 }
 
+/* ===== 建立「挖洞」：外圈(大矩形) + 內圈(鹿港圓洞) ===== */
+function buildSpotlightPolygon() {
+  // 外圈：用大矩形包住台灣附近（不要用全世界，避免你說的「整個台灣都暗到怪」）
+  // 這個範圍你也可再微調
+  const outer = [
+    { lat: 27.8, lng: 117.5 },
+    { lat: 27.8, lng: 124.8 },
+    { lat: 20.0, lng: 124.8 },
+    { lat: 20.0, lng: 117.5 }
+  ];
+
+  // 內圈（洞）：用 geometry 計算圓周點
+  const hole = makeCirclePath(LUKANG_CENTER, LUKANG_RADIUS_M, 90);
+
+  spotlightPolygon = new google.maps.Polygon({
+    map,
+    paths: [outer, hole],  // 第一個是外圈，第二個是洞
+    strokeOpacity: 0,
+    fillOpacity: 0.40,     // 變暗程度（0~1）
+    clickable: false
+  });
+}
+
+/* 產生圓形路徑點（洞） */
+function makeCirclePath(center, radiusMeters, points) {
+  const path = [];
+  for (let i = 0; i < points; i++) {
+    const angle = (360 * i) / points;
+    const p = google.maps.geometry.spherical.computeOffset(
+      new google.maps.LatLng(center.lat, center.lng),
+      radiusMeters,
+      angle
+    );
+    path.push({ lat: p.lat(), lng: p.lng() });
+  }
+  return path;
+}
+
 /* ===== 初始化地圖 ===== */
 function initMap() {
   map = new google.maps.Map(document.getElementById("map"), {
     center: LUKANG_CENTER,
-    zoom: 15,
-    disableDefaultUI: false
+    zoom: 14
   });
 
-  // 1) 加回「鹿港光圈」
-  lukangCircle = new google.maps.Circle({
-    map,
-    center: LUKANG_CENTER,
-    radius: LUKANG_CIRCLE_RADIUS_M,
-    strokeOpacity: 0.7,
-    strokeWeight: 2,
-    fillOpacity: 0.18
-  });
+  // 1) 先做「聚光燈挖洞」
+  buildSpotlightPolygon();
 
   // 2) 標記景點
   locations.forEach(loc => {
@@ -147,55 +176,47 @@ function initMap() {
     });
   });
 
-  setStatus("地圖已載入，請選擇是否啟用定位");
+  setStatus("地圖已載入，請選擇是否啟用定位（進入鹿港範圍後才開始計時）");
 }
 
-/* ===== UI：回到鹿港 ===== */
+/* ===== 回到鹿港 ===== */
 function recenterToLukang() {
   map.setCenter(LUKANG_CENTER);
-  map.setZoom(15);
+  map.setZoom(14);
   setStatus("已回到鹿港中心");
 }
 
-/* ===== 使用者選擇啟用定位 ===== */
+/* ===== 啟用定位 ===== */
 function startGeolocation() {
-  // UI 按鈕避免重複點
   document.getElementById("btnStart").disabled = true;
   document.getElementById("btnSkip").disabled = true;
 
   if (!navigator.geolocation) {
-    setStatus("你的瀏覽器不支援定位功能");
     alert("你的瀏覽器不支援定位功能");
+    setStatus("你的瀏覽器不支援定位功能");
     return;
   }
 
-  setStatus("正在啟用定位中…（若跳出權限請允許）");
+  setStatus("定位啟用中…（若跳出權限請允許）");
 
   watchId = navigator.geolocation.watchPosition(
     onLocationUpdate,
     onLocationError,
-    {
-      enableHighAccuracy: true,
-      maximumAge: 0,
-      timeout: 10000
-    }
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
   );
 }
 
-/* ===== 使用者選擇不啟用定位 ===== */
 function skipGeolocation() {
   document.getElementById("btnStart").disabled = true;
   document.getElementById("btnSkip").disabled = true;
-
   setStatus("已進入僅瀏覽模式（不計時、不追蹤位置）");
 }
 
 /* ===== 定位失敗 ===== */
 function onLocationError(err) {
-  // 不要整個卡死，回到鹿港
   recenterToLukang();
-  setStatus("定位失敗，已改為僅瀏覽（可按回到鹿港）");
-  alert("定位失敗：" + (err?.message || "未知原因") + "。將顯示鹿港地圖。");
+  setStatus("定位失敗，已改為僅瀏覽");
+  alert("定位失敗：" + (err?.message || "未知原因"));
 }
 
 /* ===== 定位更新 ===== */
@@ -206,7 +227,6 @@ function onLocationUpdate(position) {
   };
 
   if (!userMarker) {
-    // 第一次定位成功才開始計時
     userMarker = new google.maps.Marker({
       position: userPos,
       map,
@@ -219,20 +239,30 @@ function onLocationUpdate(position) {
       },
       title: "你的位置"
     });
-
-    map.setCenter(userPos);
-    map.setZoom(18);
-
-    startTimer();
-    setStatus("定位中（已開始計時）");
   } else {
     userMarker.setPosition(userPos);
   }
 
-  checkProximity(userPos);
+  // 判斷是否進入鹿港範圍（進入後才開始計時）
+  const distToCenter = getDistance(userPos.lat, userPos.lng, LUKANG_CENTER.lat, LUKANG_CENTER.lng);
+
+  if (!geofenceEntered) {
+    if (distToCenter <= LUKANG_RADIUS_M) {
+      geofenceEntered = true;
+      startTimer();
+      setStatus("已進入鹿港範圍（開始計時）");
+      map.setCenter(userPos);
+      map.setZoom(17);
+    } else {
+      setStatus(`定位中：尚未進入鹿港範圍（距中心約 ${Math.round(distToCenter)} 公尺）`);
+    }
+  } else {
+    // 進入後才開始檢查景點完成
+    checkProximity(userPos);
+  }
 }
 
-/* ===== 檢查到達景點 ===== */
+/* ===== 檢查到達景點（僅在進入鹿港後才運作）===== */
 function checkProximity(userPos) {
   locations.forEach(loc => {
     if (!remainingLocations.has(loc.name)) return;
@@ -252,7 +282,7 @@ function checkProximity(userPos) {
   });
 }
 
-/* ===== 計算距離（Haversine）===== */
+/* ===== Haversine 距離 ===== */
 function getDistance(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
