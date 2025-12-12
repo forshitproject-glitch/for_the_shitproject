@@ -6,99 +6,92 @@
 <title>鹿港景點計時地圖</title>
 
 <style>
-html, body {
-  height: 100%;
-  margin: 0;
-  padding: 0;
-}
+  html, body { height: 100%; margin: 0; padding: 0; }
 
-/* 地圖 */
-#map {
-  width: 100%;
-  height: 100%;
-}
+  /* 用 flex 把 UI 與地圖分開：上面 UI、下面地圖 */
+  #app {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
 
-/* 半透明遮罩（關鍵） */
-#overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.25);
-  z-index: 9998;
-}
+  /* 上方 UI 區（不覆蓋地圖） */
+  #uiBar {
+    flex: 0 0 auto;
+    padding: 10px 12px;
+    background: rgba(255,255,255,0.98);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    z-index: 1;
+  }
 
-/* 是否啟用定位 */
-#controlBox {
-  position: fixed;
-  bottom: 25%;
-  left: 50%;
-  transform: translateX(-50%);
-  background: white;
-  padding: 18px 22px;
-  border-radius: 14px;
-  text-align: center;
-  z-index: 9999;
-  box-shadow: 0 8px 20px rgba(0,0,0,0.3);
-  pointer-events: auto;
-}
+  #uiBar .title {
+    font-weight: 700;
+    font-size: 16px;
+    margin-right: 6px;
+  }
 
-#controlBox button {
-  font-size: 16px;
-  padding: 10px 16px;
-  margin: 6px;
-  border-radius: 8px;
-  border: none;
-  cursor: pointer;
-}
+  #timerBox {
+    font-weight: 700;
+    font-size: 16px;
+    padding: 6px 10px;
+    border-radius: 10px;
+    background: rgba(245,245,245,1);
+  }
 
-.start-btn {
-  background: #4CAF50;
-  color: white;
-}
+  #statusBox {
+    font-size: 14px;
+    color: #333;
+  }
 
-.cancel-btn {
-  background: #ddd;
-}
+  #uiBar button {
+    font-size: 14px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: none;
+    cursor: pointer;
+  }
 
-/* 計時器 */
-#timerBox {
-  position: fixed;
-  top: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(255,255,255,0.95);
-  padding: 10px 20px;
-  border-radius: 12px;
-  font-size: 18px;
-  font-weight: bold;
-  z-index: 9999;
-  display: none;
-}
+  .start-btn { background: #2e7d32; color: #fff; }
+  .cancel-btn { background: #e0e0e0; }
+  .reset-btn { background: #1565c0; color: #fff; }
+
+  /* 地圖區 */
+  #map {
+    flex: 1 1 auto;
+    width: 100%;
+  }
 </style>
 
 <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC9yd5GeV-J0SHVtpkeHvtFfSryaavAKIE"></script>
 </head>
 
 <body>
+<div id="app">
+  <!-- UI 不覆蓋地圖，永遠看得到 -->
+  <div id="uiBar">
+    <div class="title">定位與計時</div>
 
-<!-- 地圖一定要先 -->
-<div id="map"></div>
+    <button class="start-btn" id="btnStart" onclick="startGeolocation()">啟用定位</button>
+    <button class="cancel-btn" id="btnSkip" onclick="skipGeolocation()">不啟用</button>
+    <button class="reset-btn" onclick="recenterToLukang()">回到鹿港</button>
 
-<!-- 遮罩 -->
-<div id="overlay"></div>
-
-<!-- 是否啟用定位 -->
-<div id="controlBox">
-  <div style="margin-bottom:10px;font-size:16px;">
-    是否要啟用定位並開始計時？
+    <div id="timerBox">已花費時間：<span id="timer">00:00:00</span></div>
+    <div id="statusBox">狀態：尚未選擇定位模式</div>
   </div>
-  <button class="start-btn" onclick="startGeolocation()">啟用定位</button>
-  <button class="cancel-btn" onclick="skipGeolocation()">不啟用</button>
+
+  <div id="map"></div>
 </div>
 
-<!-- 計時器 -->
-<div id="timerBox">已花費時間：<span id="timer">00:00:00</span></div>
-
 <script>
+/* ===== 基本設定（鹿港中心 & 光圈）===== */
+const LUKANG_CENTER = { lat: 24.056348, lng: 120.432589 }; // 鹿港老街附近
+const LUKANG_CIRCLE_RADIUS_M = 900; // 光圈半徑（公尺）你可調：500/800/1200...
+
+/* ===== 景點資料 ===== */
 const locations = [
   { name: "玻璃館", lat: 24.068667, lng: 120.395437 },
   { name: "鹿港老街", lat: 24.056348, lng: 120.432589 },
@@ -114,15 +107,38 @@ const locations = [
   { name: "摸乳巷", lat: 24.051817, lng: 120.432231 }
 ];
 
-let map, userMarker, startTime, timerInterval;
-let remainingLocations = new Set(locations.map(l => l.name));
+let map;
+let lukangCircle = null;     // 鹿港光圈（你說的那個）
+let userMarker = null;       // 使用者位置點
+let watchId = null;          // watchPosition id
 
+let startTime = null;
+let timerInterval = null;
+let remainingLocations = new Set(locations.map(loc => loc.name));
+
+function setStatus(msg) {
+  document.getElementById("statusBox").textContent = "狀態：" + msg;
+}
+
+/* ===== 初始化地圖 ===== */
 function initMap() {
   map = new google.maps.Map(document.getElementById("map"), {
-    center: { lat: 24.056348, lng: 120.432589 },
-    zoom: 15
+    center: LUKANG_CENTER,
+    zoom: 15,
+    disableDefaultUI: false
   });
 
+  // 1) 加回「鹿港光圈」
+  lukangCircle = new google.maps.Circle({
+    map,
+    center: LUKANG_CENTER,
+    radius: LUKANG_CIRCLE_RADIUS_M,
+    strokeOpacity: 0.7,
+    strokeWeight: 2,
+    fillOpacity: 0.18
+  });
+
+  // 2) 標記景點
   locations.forEach(loc => {
     loc.marker = new google.maps.Marker({
       position: { lat: loc.lat, lng: loc.lng },
@@ -130,65 +146,150 @@ function initMap() {
       title: loc.name
     });
   });
+
+  setStatus("地圖已載入，請選擇是否啟用定位");
 }
 
+/* ===== UI：回到鹿港 ===== */
+function recenterToLukang() {
+  map.setCenter(LUKANG_CENTER);
+  map.setZoom(15);
+  setStatus("已回到鹿港中心");
+}
+
+/* ===== 使用者選擇啟用定位 ===== */
 function startGeolocation() {
-  document.getElementById("controlBox").style.display = "none";
-  document.getElementById("overlay").style.display = "none";
-  document.getElementById("timerBox").style.display = "block";
+  // UI 按鈕避免重複點
+  document.getElementById("btnStart").disabled = true;
+  document.getElementById("btnSkip").disabled = true;
 
-  navigator.geolocation.watchPosition(onLocationUpdate);
+  if (!navigator.geolocation) {
+    setStatus("你的瀏覽器不支援定位功能");
+    alert("你的瀏覽器不支援定位功能");
+    return;
+  }
+
+  setStatus("正在啟用定位中…（若跳出權限請允許）");
+
+  watchId = navigator.geolocation.watchPosition(
+    onLocationUpdate,
+    onLocationError,
+    {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 10000
+    }
+  );
 }
 
+/* ===== 使用者選擇不啟用定位 ===== */
 function skipGeolocation() {
-  document.getElementById("controlBox").style.display = "none";
-  document.getElementById("overlay").style.display = "none";
-  alert("已進入僅瀏覽模式");
+  document.getElementById("btnStart").disabled = true;
+  document.getElementById("btnSkip").disabled = true;
+
+  setStatus("已進入僅瀏覽模式（不計時、不追蹤位置）");
 }
 
-function onLocationUpdate(pos) {
-  const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+/* ===== 定位失敗 ===== */
+function onLocationError(err) {
+  // 不要整個卡死，回到鹿港
+  recenterToLukang();
+  setStatus("定位失敗，已改為僅瀏覽（可按回到鹿港）");
+  alert("定位失敗：" + (err?.message || "未知原因") + "。將顯示鹿港地圖。");
+}
+
+/* ===== 定位更新 ===== */
+function onLocationUpdate(position) {
+  const userPos = {
+    lat: position.coords.latitude,
+    lng: position.coords.longitude
+  };
+
   if (!userMarker) {
+    // 第一次定位成功才開始計時
     userMarker = new google.maps.Marker({
-      position: p,
+      position: userPos,
       map,
       icon: {
         path: google.maps.SymbolPath.CIRCLE,
         scale: 8,
-        fillColor: "red",
+        fillColor: "#FF0000",
         fillOpacity: 1,
         strokeWeight: 2
-      }
+      },
+      title: "你的位置"
     });
-    map.setCenter(p);
+
+    map.setCenter(userPos);
     map.setZoom(18);
+
     startTimer();
+    setStatus("定位中（已開始計時）");
   } else {
-    userMarker.setPosition(p);
+    userMarker.setPosition(userPos);
   }
+
+  checkProximity(userPos);
 }
 
+/* ===== 檢查到達景點 ===== */
+function checkProximity(userPos) {
+  locations.forEach(loc => {
+    if (!remainingLocations.has(loc.name)) return;
+
+    const distance = getDistance(userPos.lat, userPos.lng, loc.lat, loc.lng);
+    if (distance <= 5) {
+      loc.marker.setMap(null);
+      remainingLocations.delete(loc.name);
+
+      if (remainingLocations.size === 0) {
+        stopTimer();
+        if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+        alert("所有景點完成！總花費時間：" + document.getElementById("timer").textContent);
+        setStatus("所有景點完成！");
+      }
+    }
+  });
+}
+
+/* ===== 計算距離（Haversine）===== */
+function getDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) ** 2
+          + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180)
+          * Math.sin(dLon/2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+/* ===== 計時器 ===== */
 function startTimer() {
+  if (startTime) return;
   startTime = Date.now();
   timerInterval = setInterval(() => {
-    const t = Date.now() - startTime;
-    document.getElementById("timer").textContent = formatTime(t);
+    const diff = Date.now() - startTime;
+    document.getElementById("timer").textContent = formatTime(diff);
   }, 1000);
 }
 
+function stopTimer() {
+  clearInterval(timerInterval);
+}
+
 function formatTime(ms) {
-  let s = Math.floor(ms / 1000);
-  const h = String(Math.floor(s / 3600)).padStart(2, "0");
-  s %= 3600;
-  const m = String(Math.floor(s / 60)).padStart(2, "0");
-  const sec = String(s % 60).padStart(2, "0");
-  return `${h}:${m}:${sec}`;
+  let sec = Math.floor(ms / 1000);
+  const h = String(Math.floor(sec / 3600)).padStart(2, "0");
+  sec %= 3600;
+  const m = String(Math.floor(sec / 60)).padStart(2, "0");
+  const s = String(sec % 60).padStart(2, "0");
+  return `${h}:${m}:${s}`;
 }
 
 window.onload = initMap;
 </script>
-
 </body>
 </html>
+
 
 
