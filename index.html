@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <title>鹿港打卡追蹤 - for_chou_project</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 12px; box-sizing: border-box; background:#f7f7f7; }
+    h1 { font-size: 18px; margin: 0 0 8px 0; }
+    .ctrl { margin: 8px 0 12px 0; display:flex; gap:8px; align-items:center; }
+    button { padding:8px 12px; border: none; background:#1a73e8; color:#fff; border-radius:6px; cursor:pointer; }
+    button:disabled { opacity:0.5; cursor:not-allowed; }
+    .status { font-weight:600; color:#333; margin-left:8px; }
+    #map { width: 100%; height: 72vh; border-radius:8px; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,0.12); }
+    .footer { margin-top:10px; font-size:13px; color:#555; }
+  </style>
+</head>
+<body>
+  <h1>鹿港打卡挑戰（for_chou_project）</h1>
+  <div id="app">
+    <div class="ctrl">
+      <button id="btnStart" @click="startTracking">開始定位追蹤</button>
+      <button id="btnStop" @click="stopTracking" disabled>停止定位追蹤</button>
+      <div class="status" id="status">狀態：等待操作</div>
+    </div>
+    <div id="map"></div>
+    <div class="footer">部署至 GitHub Pages 後，請用 HTTPS 打開頁面以允許定位。</div>
+  </div>
+
+  <!-- Vue 2 -->
+  <script src="https://cdn.jsdelivr.net/npm/vue@2/dist/vue.js"></script>
+  <!-- Google Maps JS (uses your API key) -->
+  <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC9yd5GeV-J0SHVtpkeHvtFfSryaavAKIE&libraries=geometry"></script>
+
+  <script>
+  // Wrap in an IIFE to avoid leaking globals
+  (function(){
+    const app = new Vue({
+      el:'#app',
+      data: {
+        map: null,
+        watchId: null,
+        userMarker: null,
+        accuracyCircle: null,
+        lastStatus: '等待開始追蹤...',
+        arrivalThreshold: 60,
+        spotMarkers: new Map(),
+        _hasZoomedToUser: false,
+        // spots: updated list you provided (12 entries)
+        spots: [
+          { id: 'glass1', name: '玻璃館', lat: 24.068667, lng: 120.395437 },
+          { id: 'oldstreet', name: '鹿港老街', lat: 24.056348, lng: 120.432589 },
+          { id: 'longshan', name: '鹿港龍山寺', lat: 24.0504, lng: 120.4349 },
+          { id: 'matsu', name: '鹿港天后宮', lat: 24.059338, lng: 120.431380 },
+          { id: 'glassmazu', name: '玻璃媽祖廟', lat: 24.069118, lng: 120.394715 },
+          { id: 'guihua', name: '桂花巷藝術村', lat: 24.055848, lng: 120.431928 },
+          { id: 'taiwanglass', name: '臺灣玻璃館', lat: 24.068970, lng: 120.394912 },
+          { id: 'folk', name: '鹿港民俗文物館', lat: 24.054200, lng: 120.436306 },
+          { id: 'jiuqu', name: '九曲巷', lat: 24.0535, lng: 120.4350 },
+          { id: 'shiyi', name: '十宜樓', lat: 24.0535, lng: 120.4353 },
+          { id: 'yilou', name: '鹿港意樓', lat: 24.0529, lng: 120.4353 },
+          { id: 'moruxiang', name: '摸乳巷', lat: 24.051817, lng: 120.432231 }
+        ],
+        lukangCenter: { lat: 24.0565, lng: 120.4351 }
+      },
+      methods: {
+        initMap() {
+          const lukang = this.lukangCenter;
+          const taiwanCenter = { lat: 23.7, lng: 121 };
+
+          this.map = new google.maps.Map(document.getElementById('map'), {
+            center: lukang,
+            zoom: 14,
+            mapTypeId: 'roadmap',
+            styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
+          });
+
+          // ensure map renders nicely in some embed contexts
+          setTimeout(() => {
+            google.maps.event.trigger(this.map, 'resize');
+            this.map.setCenter(lukang);
+          }, 120);
+
+          // create mask: taiwan dark + lukang bright hole using Polygon with hole
+          const createCirclePath = (center, radius, points=128) => {
+            const res = [];
+            const R = 6378137;
+            const lat = center.lat * Math.PI/180;
+            const lng = center.lng * Math.PI/180;
+            const d = radius / R;
+            for (let i=0;i<=points;i++){
+              const b = i*2*Math.PI/points;
+              const latP = Math.asin(Math.sin(lat)*Math.cos(d) + Math.cos(lat)*Math.sin(d)*Math.cos(b));
+              const lngP = lng + Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(lat), Math.cos(d)-Math.sin(lat)*Math.sin(latP));
+              res.push({ lat: latP*180/Math.PI, lng: lngP*180/Math.PI });
+            }
+            return res;
+          };
+
+          const taiwanCircle = createCirclePath(taiwanCenter, 350000);
+          const lukangHole = createCirclePath(lukang, 6000).reverse();
+
+          new google.maps.Polygon({
+            paths: [taiwanCircle, lukangHole],
+            strokeColor: 'transparent',
+            strokeOpacity: 0,
+            fillColor: 'black',
+            fillOpacity: 0.5,
+            clickable: false,
+            map: this.map
+          });
+
+          // fit to lukang hole for nice initial view
+          const bounds = new google.maps.LatLngBounds();
+          lukangHole.forEach(p => bounds.extend(p));
+          this.map.fitBounds(bounds, 80);
+          this.map.setOptions({ maxZoom: 17 });
+
+          // render spots
+          this.renderSpots();
+
+          // user marker (small red dot)
+          this.userMarker = new google.maps.Marker({
+            map: this.map,
+            title: '我的位置',
+            icon: {
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: 5,
+              fillColor: '#FF3B30',
+              fillOpacity: 1,
+              strokeColor: '#ffffff',
+              strokeWeight: 2
+            },
+            visible: false
+          });
+
+          this.accuracyCircle = new google.maps.Circle({
+            map: this.map,
+            strokeColor: 'transparent',
+            fillColor: '#1a73e8',
+            fillOpacity: 0.12,
+            visible: false
+          });
+
+          // wire up buttons (for non-Vue click handlers fallback)
+          const btnStart = document.getElementById('btnStart');
+          const btnStop = document.getElementById('btnStop');
+          btnStart.addEventListener('click', () => this.startTracking());
+          btnStop.addEventListener('click', () => this.stopTracking());
+          this.updateStatus(this.lastStatus);
+
+          // If user declined earlier or browser blocks geolocation in iframe, try a prompt when map loads:
+          // We do NOT auto-request here; startTracking button will request permission.
+        },
+
+        renderSpots() {
+          this.spots.forEach(s => {
+            const m = new google.maps.Marker({
+              position: { lat: s.lat, lng: s.lng },
+              map: this.map,
+              title: s.name
+            });
+            this.spotMarkers.set(s.name, m);
+          });
+        },
+
+        updateStatus(text){
+          this.lastStatus = text;
+          const el = document.getElementById('status');
+          if(el) el.textContent = '狀態：' + text;
+          // enable/disable buttons
+          document.getElementById('btnStop').disabled = !this.watchId;
+          document.getElementById('btnStart').disabled = !!this.watchId;
+        },
+
+        startTracking(){
+          if (!('geolocation' in navigator)) {
+            this.updateStatus('此瀏覽器不支援定位');
+            return;
+          }
+          if (this.watchId) return;
+
+          this.updateStatus('正在請求定位權限...');
+          // use watchPosition for continuous tracking
+          this.watchId = navigator.geolocation.watchPosition(
+            pos => {
+              const { latitude, longitude, accuracy } = pos.coords;
+              const latLng = new google.maps.LatLng(latitude, longitude);
+
+              // update markers
+              this.userMarker.setPosition(latLng);
+              this.userMarker.setVisible(true);
+              this.accuracyCircle.setCenter(latLng);
+              this.accuracyCircle.setRadius(accuracy || 50);
+              this.accuracyCircle.setVisible(true);
+
+              if (!this._hasZoomedToUser) {
+                this._hasZoomedToUser = true;
+                this.map.setCenter(latLng);
+                this.map.setZoom(17);
+              }
+
+              // check arrivals
+              this.checkArrivals(latLng);
+              this.updateStatus(`定位成功（±${Math.round(accuracy)}m）`);
+            },
+            err => {
+              // user denied or error
+              this.updateStatus('定位失敗或被拒絕：' + (err.message||err.code));
+              // set map back to lukang
+              this.map.setCenter(this.lukangCenter);
+              this.map.setZoom(14);
+              // clear watch if error code PERMISSION_DENIED
+              if (err.code === 1 && this.watchId) {
+                navigator.geolocation.clearWatch(this.watchId);
+                this.watchId = null;
+                this.updateStatus('定位權限被拒絕');
+              }
+            },
+            { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+          );
+          this.updateStatus('正在追蹤定位中...');
+        },
+
+        stopTracking(){
+          if (this.watchId) {
+            navigator.geolocation.clearWatch(this.watchId);
+            this.watchId = null;
+            this.userMarker.setVisible(false);
+            this.accuracyCircle.setVisible(false);
+            this.updateStatus('已停止追蹤');
+          }
+        },
+
+        checkArrivals(userLatLng){
+          for (const [key, marker] of this.spotMarkers.entries()){
+            const dist = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, marker.getPosition());
+            if (dist <= this.arrivalThreshold) {
+              // mark removal + simple status
+              marker.setMap(null);
+              this.spotMarkers.delete(key);
+              this.updateStatus(`到達 ${marker.getTitle()} 並移除`);
+            }
+          }
+        }
+      },
+
+      mounted(){
+        // wait for google maps to be ready
+        const t = setInterval(()=>{
+          if (window.google && google.maps) {
+            clearInterval(t);
+            this.initMap();
+          }
+        }, 200);
+      }
+    });
+  })();
+  </script>
+</body>
+</html>
