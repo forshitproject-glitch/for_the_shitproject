@@ -12,60 +12,66 @@ html, body {
   padding: 0;
 }
 
+/* 地圖 */
 #map {
   width: 100%;
   height: 100%;
-  position: absolute;
-  top: 0;
-  left: 0;
 }
 
-/* 計時顯示 */
-#timerBox {
+/* 半透明遮罩（關鍵） */
+#overlay {
   position: fixed;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(255,255,255,0.9);
-  padding: 10px 20px;
-  border-radius: 12px;
-  font-size: 20px;
-  font-weight: bold;
-  z-index: 9999;
-  box-shadow: 0 0 10px rgba(0,0,0,0.2);
-  display: none;
+  inset: 0;
+  background: rgba(0,0,0,0.25);
+  z-index: 9998;
 }
 
-/* 定位控制盒 */
+/* 是否啟用定位 */
 #controlBox {
   position: fixed;
-  bottom: 20px;
+  bottom: 25%;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(255,255,255,0.95);
-  padding: 15px 20px;
+  background: white;
+  padding: 18px 22px;
   border-radius: 14px;
-  z-index: 9999;
-  box-shadow: 0 0 10px rgba(0,0,0,0.25);
   text-align: center;
+  z-index: 9999;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+  pointer-events: auto;
 }
 
 #controlBox button {
   font-size: 16px;
-  padding: 8px 14px;
-  margin: 5px;
+  padding: 10px 16px;
+  margin: 6px;
   border-radius: 8px;
   border: none;
   cursor: pointer;
 }
 
 .start-btn {
-  background-color: #4CAF50;
+  background: #4CAF50;
   color: white;
 }
 
 .cancel-btn {
-  background-color: #ccc;
+  background: #ddd;
+}
+
+/* 計時器 */
+#timerBox {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255,255,255,0.95);
+  padding: 10px 20px;
+  border-radius: 12px;
+  font-size: 18px;
+  font-weight: bold;
+  z-index: 9999;
+  display: none;
 }
 </style>
 
@@ -74,18 +80,25 @@ html, body {
 
 <body>
 
-<div id="timerBox">已花費時間：<span id="timer">00:00:00</span></div>
+<!-- 地圖一定要先 -->
+<div id="map"></div>
 
+<!-- 遮罩 -->
+<div id="overlay"></div>
+
+<!-- 是否啟用定位 -->
 <div id="controlBox">
-  <div style="margin-bottom:8px;">是否要啟用定位並開始計時？</div>
+  <div style="margin-bottom:10px;font-size:16px;">
+    是否要啟用定位並開始計時？
+  </div>
   <button class="start-btn" onclick="startGeolocation()">啟用定位</button>
   <button class="cancel-btn" onclick="skipGeolocation()">不啟用</button>
 </div>
 
-<div id="map"></div>
+<!-- 計時器 -->
+<div id="timerBox">已花費時間：<span id="timer">00:00:00</span></div>
 
 <script>
-// ===== 景點資料 =====
 const locations = [
   { name: "玻璃館", lat: 24.068667, lng: 120.395437 },
   { name: "鹿港老街", lat: 24.056348, lng: 120.432589 },
@@ -101,21 +114,15 @@ const locations = [
   { name: "摸乳巷", lat: 24.051817, lng: 120.432231 }
 ];
 
-let map;
-let userMarker = null;
-let startTime = null;
-let timerInterval = null;
-let remainingLocations = new Set(locations.map(loc => loc.name));
-let watchId = null;
+let map, userMarker, startTime, timerInterval;
+let remainingLocations = new Set(locations.map(l => l.name));
 
-// ===== 初始化地圖 =====
 function initMap() {
-  map = new google.maps.Map(document.getElementById('map'), {
+  map = new google.maps.Map(document.getElementById("map"), {
     center: { lat: 24.056348, lng: 120.432589 },
     zoom: 15
   });
 
-  // 標記所有景點
   locations.forEach(loc => {
     loc.marker = new google.maps.Marker({
       position: { lat: loc.lat, lng: loc.lng },
@@ -125,122 +132,56 @@ function initMap() {
   });
 }
 
-// ===== 使用者選擇啟用定位 =====
 function startGeolocation() {
   document.getElementById("controlBox").style.display = "none";
+  document.getElementById("overlay").style.display = "none";
   document.getElementById("timerBox").style.display = "block";
 
-  if (!navigator.geolocation) {
-    alert("你的瀏覽器不支援定位功能");
-    return;
-  }
-
-  watchId = navigator.geolocation.watchPosition(
-    onLocationUpdate,
-    onLocationError,
-    {
-      enableHighAccuracy: true,
-      maximumAge: 0,
-      timeout: 10000
-    }
-  );
+  navigator.geolocation.watchPosition(onLocationUpdate);
 }
 
-// ===== 使用者選擇不啟用定位 =====
 function skipGeolocation() {
   document.getElementById("controlBox").style.display = "none";
-  alert("已進入僅瀏覽模式（不計時、不追蹤位置）");
+  document.getElementById("overlay").style.display = "none";
+  alert("已進入僅瀏覽模式");
 }
 
-// ===== 定位成功 =====
-function onLocationUpdate(position) {
-  const userPos = {
-    lat: position.coords.latitude,
-    lng: position.coords.longitude
-  };
-
+function onLocationUpdate(pos) {
+  const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
   if (!userMarker) {
     userMarker = new google.maps.Marker({
-      position: userPos,
+      position: p,
       map,
       icon: {
         path: google.maps.SymbolPath.CIRCLE,
         scale: 8,
-        fillColor: "#FF0000",
+        fillColor: "red",
         fillOpacity: 1,
         strokeWeight: 2
       }
     });
-
-    map.setCenter(userPos);
+    map.setCenter(p);
     map.setZoom(18);
     startTimer();
   } else {
-    userMarker.setPosition(userPos);
+    userMarker.setPosition(p);
   }
-
-  checkProximity(userPos);
 }
 
-// ===== 定位失敗 =====
-function onLocationError() {
-  alert("定位失敗，將顯示鹿港地圖");
-  map.setCenter({ lat: 24.056348, lng: 120.432589 });
-  map.setZoom(16);
-}
-
-// ===== 檢查是否到達景點 =====
-function checkProximity(userPos) {
-  locations.forEach(loc => {
-    if (remainingLocations.has(loc.name)) {
-      const distance = getDistance(userPos.lat, userPos.lng, loc.lat, loc.lng);
-      if (distance <= 5) {
-        loc.marker.setMap(null);
-        remainingLocations.delete(loc.name);
-
-        if (remainingLocations.size === 0) {
-          stopTimer();
-          alert("所有景點完成！總花費時間：" + document.getElementById("timer").textContent);
-          navigator.geolocation.clearWatch(watchId);
-        }
-      }
-    }
-  });
-}
-
-// ===== 計算距離 =====
-function getDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371000;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * Math.PI / 180) *
-    Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-// ===== 計時器 =====
 function startTimer() {
-  if (startTime) return;
   startTime = Date.now();
   timerInterval = setInterval(() => {
-    const diff = Date.now() - startTime;
-    document.getElementById("timer").textContent = formatTime(diff);
+    const t = Date.now() - startTime;
+    document.getElementById("timer").textContent = formatTime(t);
   }, 1000);
 }
 
-function stopTimer() {
-  clearInterval(timerInterval);
-}
-
 function formatTime(ms) {
-  let sec = Math.floor(ms / 1000);
-  const h = String(Math.floor(sec / 3600)).padStart(2, "0");
-  sec %= 3600;
-  const m = String(Math.floor(sec / 60)).padStart(2, "0");
-  sec = String(sec % 60).padStart(2, "0");
+  let s = Math.floor(ms / 1000);
+  const h = String(Math.floor(s / 3600)).padStart(2, "0");
+  s %= 3600;
+  const m = String(Math.floor(s / 60)).padStart(2, "0");
+  const sec = String(s % 60).padStart(2, "0");
   return `${h}:${m}:${sec}`;
 }
 
@@ -249,6 +190,5 @@ window.onload = initMap;
 
 </body>
 </html>
-
 
 
