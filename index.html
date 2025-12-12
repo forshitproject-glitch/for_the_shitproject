@@ -38,7 +38,6 @@
   #map { flex: 1 1 auto; width: 100%; }
 </style>
 
-<!-- 這版不需要 geometry -->
 <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC9yd5GeV-J0SHVtpkeHvtFfSryaavAKIE"></script>
 </head>
 
@@ -60,7 +59,12 @@
 <script>
 /* ===== 鹿港中心與半徑（進入後才開始計時）===== */
 const LUKANG_CENTER = { lat: 24.056348, lng: 120.432589 };
-const LUKANG_RADIUS_M = 900; // 你要的鹿港範圍（公尺），可調：600/800/1200...
+
+/*  改大：圈住整個鹿港（建議 2500~3500m） */
+const LUKANG_RADIUS_M = 3000; // 3km
+
+/*  亮度更高：遮罩更透明（建議 0.18~0.25） */
+const DIM_OPACITY = 0.22;
 
 /* ===== 景點資料 ===== */
 const locations = [
@@ -79,8 +83,8 @@ const locations = [
 ];
 
 let map;
-let lukangCircle = null;        // 明顯可見的鹿港圓圈
-let spotlightPolygon = null;    // 全台變暗 + 鹿港挖洞
+let lukangCircle = null;
+let spotlightPolygon = null;
 let userMarker = null;
 let watchId = null;
 
@@ -93,9 +97,9 @@ function setStatus(msg) {
   document.getElementById("statusBox").textContent = "狀態：" + msg;
 }
 
-/* ===== 不用 geometry 的圓形路徑（近似，1km 範圍很夠用）===== */
-function makeCirclePathApprox(center, radiusMeters, points=120) {
-  const R = 6378137; // 地球半徑（WGS84）
+/* 不用 geometry 的圓形洞（近似足夠） */
+function makeCirclePathApprox(center, radiusMeters, points=160) {
+  const R = 6378137;
   const lat0 = center.lat * Math.PI / 180;
   const lng0 = center.lng * Math.PI / 180;
   const d = radiusMeters / R;
@@ -104,7 +108,6 @@ function makeCirclePathApprox(center, radiusMeters, points=120) {
   for (let i = 0; i < points; i++) {
     const brng = (2 * Math.PI * i) / points;
 
-    // 目的地點（球面公式）
     const lat = Math.asin(Math.sin(lat0)*Math.cos(d) + Math.cos(lat0)*Math.sin(d)*Math.cos(brng));
     const lng = lng0 + Math.atan2(Math.sin(brng)*Math.sin(d)*Math.cos(lat0), Math.cos(d)-Math.sin(lat0)*Math.sin(lat));
 
@@ -113,9 +116,8 @@ function makeCirclePathApprox(center, radiusMeters, points=120) {
   return path;
 }
 
-/* ===== 全台變暗 + 鹿港挖洞 ===== */
 function buildSpotlight() {
-  // 外圈：覆蓋台灣附近即可（避免你說的「全台都暗到怪」可以再調透明度）
+  // 外圈：覆蓋台灣附近（夠用）
   const outer = [
     { lat: 27.8, lng: 117.5 },
     { lat: 27.8, lng: 124.8 },
@@ -123,31 +125,29 @@ function buildSpotlight() {
     { lat: 20.0, lng: 117.5 }
   ];
 
-  // 內圈（洞）：用近似圓
-  const hole = makeCirclePathApprox(LUKANG_CENTER, LUKANG_RADIUS_M, 140);
+  const hole = makeCirclePathApprox(LUKANG_CENTER, LUKANG_RADIUS_M, 180);
 
   spotlightPolygon = new google.maps.Polygon({
     map,
     paths: [outer, hole],
     fillColor: "#000000",
-    fillOpacity: 0.35,   // 變暗程度（0~1）你可調：0.25 比較淡、0.5 更暗
+    fillOpacity: DIM_OPACITY,  //  亮度：越小越亮（越不暗）
     strokeOpacity: 0,
     clickable: false,
     zIndex: 2
   });
 }
 
-/* ===== 鹿港「範圍圈」一定要看得見 ===== */
 function buildLukangCircle() {
   lukangCircle = new google.maps.Circle({
     map,
     center: LUKANG_CENTER,
     radius: LUKANG_RADIUS_M,
     strokeColor: "#FF9800",
-    strokeOpacity: 0.95,
+    strokeOpacity: 0.9,
     strokeWeight: 3,
     fillColor: "#FF9800",
-    fillOpacity: 0.12,
+    fillOpacity: 0.08,  // 圈內淡淡的色，不會白
     clickable: false,
     zIndex: 3
   });
@@ -156,10 +156,9 @@ function buildLukangCircle() {
 function initMap() {
   map = new google.maps.Map(document.getElementById("map"), {
     center: LUKANG_CENTER,
-    zoom: 14
+    zoom: 13  // 半徑變大，縮一點比較像「整個鹿港」
   });
 
-  // 景點標記
   locations.forEach(loc => {
     loc.marker = new google.maps.Marker({
       position: { lat: loc.lat, lng: loc.lng },
@@ -168,16 +167,15 @@ function initMap() {
     });
   });
 
-  // 先畫挖洞、再畫圈（圈 zIndex 比洞高）
   buildSpotlight();
   buildLukangCircle();
 
-  setStatus("地圖已載入：進入鹿港範圍（橘色圈）後才開始計時");
+  setStatus("地圖已載入：進入鹿港範圍（橘圈）後才開始計時");
 }
 
 function recenterToLukang() {
   map.setCenter(LUKANG_CENTER);
-  map.setZoom(14);
+  map.setZoom(13);
   setStatus("已回到鹿港中心");
 }
 
@@ -232,7 +230,6 @@ function onLocationUpdate(position) {
     userMarker.setPosition(userPos);
   }
 
-  // 進入鹿港圈後才開始計時
   const dist = getDistance(userPos.lat, userPos.lng, LUKANG_CENTER.lat, LUKANG_CENTER.lng);
 
   if (!geofenceEntered) {
@@ -241,7 +238,7 @@ function onLocationUpdate(position) {
       startTimer();
       setStatus("✅ 已進入鹿港範圍（開始計時）");
       map.setCenter(userPos);
-      map.setZoom(17);
+      map.setZoom(16);
     } else {
       setStatus(`定位中：尚未進入鹿港範圍（距中心約 ${Math.round(dist)} 公尺）`);
     }
