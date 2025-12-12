@@ -1,38 +1,91 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>鹿港景點計時地圖</title>
-  <style>
-    html, body {
-      height: 100%; margin: 0; padding: 0;
-    }
-    #map {
-      width: 100%; height: 100%; position: absolute; top: 0; left: 0;
-    }
-    #timerBox {
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(255,255,255,0.9);
-      padding: 10px 20px;
-      border-radius: 12px;
-      font-size: 20px;
-      font-weight: bold;
-      z-index: 9999;
-      box-shadow: 0 0 10px rgba(0,0,0,0.2);
-    }
-  </style>
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC9yd5GeV-J0SHVtpkeHvtFfSryaavAKIE"></script>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>鹿港景點計時地圖</title>
+
+<style>
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+#map {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* 計時顯示 */
+#timerBox {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255,255,255,0.9);
+  padding: 10px 20px;
+  border-radius: 12px;
+  font-size: 20px;
+  font-weight: bold;
+  z-index: 9999;
+  box-shadow: 0 0 10px rgba(0,0,0,0.2);
+  display: none;
+}
+
+/* 定位控制盒 */
+#controlBox {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255,255,255,0.95);
+  padding: 15px 20px;
+  border-radius: 14px;
+  z-index: 9999;
+  box-shadow: 0 0 10px rgba(0,0,0,0.25);
+  text-align: center;
+}
+
+#controlBox button {
+  font-size: 16px;
+  padding: 8px 14px;
+  margin: 5px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+}
+
+.start-btn {
+  background-color: #4CAF50;
+  color: white;
+}
+
+.cancel-btn {
+  background-color: #ccc;
+}
+</style>
+
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC9yd5GeV-J0SHVtpkeHvtFfSryaavAKIE"></script>
 </head>
+
 <body>
-  <div id="timerBox">已花費時間：<span id="timer">00:00:00</span></div>
-  <div id="map"></div>
+
+<div id="timerBox">已花費時間：<span id="timer">00:00:00</span></div>
+
+<div id="controlBox">
+  <div style="margin-bottom:8px;">是否要啟用定位並開始計時？</div>
+  <button class="start-btn" onclick="startGeolocation()">啟用定位</button>
+  <button class="cancel-btn" onclick="skipGeolocation()">不啟用</button>
+</div>
+
+<div id="map"></div>
 
 <script>
-// 景點資料
+// ===== 景點資料 =====
 const locations = [
   { name: "玻璃館", lat: 24.068667, lng: 120.395437 },
   { name: "鹿港老街", lat: 24.056348, lng: 120.432589 },
@@ -53,15 +106,16 @@ let userMarker = null;
 let startTime = null;
 let timerInterval = null;
 let remainingLocations = new Set(locations.map(loc => loc.name));
+let watchId = null;
 
+// ===== 初始化地圖 =====
 function initMap() {
   map = new google.maps.Map(document.getElementById('map'), {
     center: { lat: 24.056348, lng: 120.432589 },
-    zoom: 15,
-    disableDefaultUI: false
+    zoom: 15
   });
 
-  // 標記景點
+  // 標記所有景點
   locations.forEach(loc => {
     loc.marker = new google.maps.Marker({
       position: { lat: loc.lat, lng: loc.lng },
@@ -69,25 +123,36 @@ function initMap() {
       title: loc.name
     });
   });
+}
 
-  // 啟動定位
-  if (navigator.geolocation) {
-    navigator.geolocation.watchPosition(onLocationUpdate, onLocationError, {
+// ===== 使用者選擇啟用定位 =====
+function startGeolocation() {
+  document.getElementById("controlBox").style.display = "none";
+  document.getElementById("timerBox").style.display = "block";
+
+  if (!navigator.geolocation) {
+    alert("你的瀏覽器不支援定位功能");
+    return;
+  }
+
+  watchId = navigator.geolocation.watchPosition(
+    onLocationUpdate,
+    onLocationError,
+    {
       enableHighAccuracy: true,
       maximumAge: 0,
       timeout: 10000
-    });
-  } else {
-    alert("你的瀏覽器不支援定位功能");
-  }
+    }
+  );
 }
 
-function onLocationError() {
-  alert("定位失敗，將以鹿港為中心顯示地圖");
-  map.setCenter({ lat: 24.056348, lng: 120.432589 });
-  map.setZoom(16);
+// ===== 使用者選擇不啟用定位 =====
+function skipGeolocation() {
+  document.getElementById("controlBox").style.display = "none";
+  alert("已進入僅瀏覽模式（不計時、不追蹤位置）");
 }
 
+// ===== 定位成功 =====
 function onLocationUpdate(position) {
   const userPos = {
     lat: position.coords.latitude,
@@ -109,7 +174,6 @@ function onLocationUpdate(position) {
 
     map.setCenter(userPos);
     map.setZoom(18);
-
     startTimer();
   } else {
     userMarker.setPosition(userPos);
@@ -118,6 +182,14 @@ function onLocationUpdate(position) {
   checkProximity(userPos);
 }
 
+// ===== 定位失敗 =====
+function onLocationError() {
+  alert("定位失敗，將顯示鹿港地圖");
+  map.setCenter({ lat: 24.056348, lng: 120.432589 });
+  map.setZoom(16);
+}
+
+// ===== 檢查是否到達景點 =====
 function checkProximity(userPos) {
   locations.forEach(loc => {
     if (remainingLocations.has(loc.name)) {
@@ -129,27 +201,33 @@ function checkProximity(userPos) {
         if (remainingLocations.size === 0) {
           stopTimer();
           alert("所有景點完成！總花費時間：" + document.getElementById("timer").textContent);
+          navigator.geolocation.clearWatch(watchId);
         }
       }
     }
   });
 }
 
+// ===== 計算距離 =====
 function getDistance(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat/2) ** 2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) *
+    Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// ===== 計時器 =====
 function startTimer() {
   if (startTime) return;
   startTime = Date.now();
-
   timerInterval = setInterval(() => {
     const diff = Date.now() - startTime;
-    document.getElementById('timer').textContent = formatTime(diff);
+    document.getElementById("timer").textContent = formatTime(diff);
   }, 1000);
 }
 
@@ -159,14 +237,18 @@ function stopTimer() {
 
 function formatTime(ms) {
   let sec = Math.floor(ms / 1000);
-  const h = String(Math.floor(sec / 3600)).padStart(2, '0');
+  const h = String(Math.floor(sec / 3600)).padStart(2, "0");
   sec %= 3600;
-  const m = String(Math.floor(sec / 60)).padStart(2, '0');
-  sec = String(sec % 60).padStart(2, '0');
+  const m = String(Math.floor(sec / 60)).padStart(2, "0");
+  sec = String(sec % 60).padStart(2, "0");
   return `${h}:${m}:${sec}`;
 }
 
 window.onload = initMap;
 </script>
+
 </body>
 </html>
+
+
+
