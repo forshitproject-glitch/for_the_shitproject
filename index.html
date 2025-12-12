@@ -1,251 +1,64 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8" />
-  <title>鹿港景點導覽地圖</title>
-  <script src="https://cdn.jsdelivr.net/npm/vue@2/dist/vue.js"></script>
-  <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC9yd5GeV-J0SHVtpkeHvtFfSryaavAKIE&libraries=geometry"></script>
-
-  <style>
-    body { margin: 0; font-family: sans-serif; }
-    #map { width: 100%; height: 540px; }
-    .ctrl { padding: 10px; }
-    button { margin-right: 10px; }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>鹿港景點計時地圖</title>
+<style>
+html, body {
+height: 100%; margin: 0; padding: 0;
+}
+#map {
+width: 100%; height: 100%; position: absolute; top: 0; left: 0;
+}
+#timerBox {
+position: fixed;
+top: 20px;
+left: 50%;
+transform: translateX(-50%);
+background: rgba(255,255,255,0.9);
+padding: 10px 20px;
+border-radius: 12px;
+font-size: 20px;
+font-weight: bold;
+z-index: 9999;
+box-shadow: 0 0 10px rgba(0,0,0,0.2);
+}
+</style>
+<script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY"></script>
 </head>
-
 <body>
-<div id="app">
-  <div class="ctrl">
-    <button @click="startTracking">開始定位追蹤</button>
-    <button @click="stopTracking" :disabled="!watchId">停止定位追蹤</button>
-    <span v-if="lastStatus">｜ {{ lastStatus }}</span>
-  </div>
-  <div id="map"></div>
-</div>
+<div id="timerBox">已花費時間：<span id="timer">00:00:00</span></div>
+<div id="map"></div>
+
 
 <script>
-const googleMap = new Vue({
-  el: "#app",
-  data: {
-    map: null,
-    watchId: null,
-    userMarker: null,
-    accuracyCircle: null,
-    lastStatus: "",
-    arrivalThreshold: 5, // 5 公尺範圍即視為抵達景點
-    insideStartTime: null,
-    totalStaySeconds: 0,
-    lukangPolygon: null,
+// 景點資料
+const locations = [
+{ name: "玻璃館", lat: 24.068667, lng: 120.395437 },
+{ name: "鹿港老街", lat: 24.056348, lng: 120.432589 },
+{ name: "鹿港龍山寺", lat: 24.0504, lng: 120.4349 },
+{ name: "鹿港天后宮", lat: 24.059338, lng: 120.431380 },
+{ name: "玻璃媽祖廟", lat: 24.069118, lng: 120.394715 },
+{ name: "桂花巷藝術村", lat: 24.055848, lng: 120.431928 },
+{ name: "臺灣玻璃館", lat: 24.068970, lng: 120.394912 },
+{ name: "鹿港民俗文物館", lat: 24.054200, lng: 120.436306 },
+{ name: "九曲巷", lat: 24.0535, lng: 120.4350 },
+{ name: "十宜樓", lat: 24.0535, lng: 120.4353 },
+{ name: "鹿港意樓", lat: 24.0529, lng: 120.4353 },
+{ name: "摸乳巷", lat: 24.051817, lng: 120.432231 }
+];
 
-    // 🏁 景點資料（11 個）
-    spots: [
-      { id: "glass", name: "玻璃館", lat: 24.068667, lng: 120.395437 },
-      { id: "oldstreet", name: "鹿港老街", lat: 24.056348, lng: 120.432589 },
-      { id: "longshan", name: "鹿港龍山寺", lat: 24.0504, lng: 120.4349 },
-      { id: "matsu", name: "鹿港天后宮", lat: 24.059338, lng: 120.431380 },
-      { id: "glassmatsu", name: "玻璃媽祖廟", lat: 24.069118, lng: 120.394715 },
-      { id: "osmanthus", name: "桂花巷藝術村", lat: 24.055848, lng: 120.431928 },
-      { id: "twglass", name: "臺灣玻璃館", lat: 24.068970, lng: 120.394912 },
-      { id: "museum", name: "鹿港名民俗文物館", lat: 24.054200, lng: 120.436306 },
-      { id: "jiuqu", name: "九曲巷", lat: 24.0535, lng: 120.4350 },
-      { id: "shiyi", name: "十宜樓", lat: 24.0535, lng: 120.4353 },
-      { id: "moru", name: "摸乳巷", lat: 24.051817, lng: 120.432231 }
-    ],
 
-    spotMarkers: new Map()
-  },
+let map;
+let userMarker = null;
+let startTime = null;
+let timerInterval = null;
+let remainingLocations = new Set(locations.map(loc => loc.name));
 
-  methods: {
-    initMap() {
-      const lukang = { lat: 24.0565, lng: 120.4351 };
-      const taiwanCenter = { lat: 23.7, lng: 121 };
 
-      // 地圖初始化
-      this.map = new google.maps.Map(document.getElementById("map"), {
-        center: lukang,
-        zoom: 7,
-        mapTypeId: "roadmap",
-      });
-
-      // 工具：產生圓形 Polygon 點
-      const createCirclePath = (center, radius, points = 128) => {
-        const arr = [];
-        const R = 6378137;
-        const lat = center.lat * Math.PI/180;
-        const lng = center.lng * Math.PI/180;
-        const d = radius / R;
-
-        for (let i = 0; i <= points; i++) {
-          const a = (i * 2 * Math.PI) / points;
-          const latP = Math.asin(Math.sin(lat) * Math.cos(d) + Math.cos(lat) * Math.sin(d) * Math.cos(a));
-          const lngP = lng + Math.atan2(
-            Math.sin(a) * Math.sin(d) * Math.cos(lat),
-            Math.cos(d) - Math.sin(lat) * Math.sin(latP)
-          );
-          arr.push({ lat: latP * 180 / Math.PI, lng: lngP * 180 / Math.PI });
-        }
-        return arr;
-      };
-
-      // 遮罩：台灣暗、鹿港亮洞口
-      const taiwanCircle = createCirclePath(taiwanCenter, 350000);
-      const lukangHole = createCirclePath(lukang, 6000).reverse();
-
-      this.lukangPolygon = new google.maps.Polygon({
-        paths: [taiwanCircle, lukangHole],
-        strokeColor: "transparent",
-        strokeOpacity: 0,
-        fillColor: "black",
-        fillOpacity: 0.5,
-        clickable: false,
-        map: this.map
-      });
-
-      // 適當縮放
-      const bounds = new google.maps.LatLngBounds();
-      lukangHole.forEach(p => bounds.extend(p));
-      this.map.fitBounds(bounds, 80);
-      this.map.setOptions({ maxZoom: 17 });
-
-      // 放景點
-      this.renderSpots();
-
-      // 使用者標記（起始隱藏）
-      this.userMarker = new google.maps.Marker({
-        map: this.map,
-        visible: false,
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 7,
-          fillColor: "red",
-          fillOpacity: 1,
-          strokeColor: "white",
-          strokeWeight: 2
-        }
-      });
-
-      this.accuracyCircle = new google.maps.Circle({
-        map: this.map,
-        fillColor: "#4285F4",
-        fillOpacity: 0.15,
-        strokeOpacity: 0,
-        visible: false
-      });
-    },
-
-    renderSpots() {
-      this.spots.forEach(s => {
-        const m = new google.maps.Marker({
-          position: { lat: s.lat, lng: s.lng },
-          map: this.map,
-          title: s.name
-        });
-        this.spotMarkers.set(s.id, m);
-      });
-    },
-
-    startTracking() {
-      if (!navigator.geolocation) {
-        this.lastStatus = "瀏覽器不支援定位";
-        return;
-      }
-
-      this.watchId = navigator.geolocation.watchPosition(
-        pos => {
-          const { latitude, longitude, accuracy } = pos.coords;
-          const point = new google.maps.LatLng(latitude, longitude);
-
-          // 顯示使用者位置與精度
-          this.userMarker.setPosition(point);
-          this.userMarker.setVisible(true);
-          this.accuracyCircle.setCenter(point);
-          this.accuracyCircle.setRadius(accuracy || 50);
-          this.accuracyCircle.setVisible(true);
-
-          // 進入鹿港圈 → 計時開始
-          const inside = google.maps.geometry.poly.containsLocation(
-            point,
-            this.lukangPolygon
-          );
-
-          if (inside && !this.insideStartTime) {
-            this.insideStartTime = Date.now();
-          }
-
-          if (!inside && this.insideStartTime) {
-            this.totalStaySeconds += (Date.now() - this.insideStartTime) / 1000;
-            this.insideStartTime = null;
-          }
-
-          // 自動縮放到使用者 100m
-          this.map.setCenter(point);
-          this.map.setZoom(18);
-
-          // 檢查景點
-          this.checkArrivals(point);
-
-          this.lastStatus = `定位成功（±${Math.round(accuracy)}m）`;
-        },
-
-        err => {
-          this.lastStatus = "未開啟定位 → 顯示鹿港";
-          this.map.setCenter({ lat: 24.0565, lng: 120.4351 });
-          this.map.setZoom(15);
-        },
-
-        { enableHighAccuracy: true, timeout: 15000 }
-      );
-    },
-
-    stopTracking() {
-      if (this.watchId) {
-        navigator.geolocation.clearWatch(this.watchId);
-        this.watchId = null;
-        this.lastStatus = "已停止追蹤";
-      }
-    },
-
-    checkArrivals(userLoc) {
-      for (const [id, marker] of this.spotMarkers.entries()) {
-        const dist = google.maps.geometry.spherical.computeDistanceBetween(
-          userLoc,
-          marker.getPosition()
-        );
-
-        if (dist <= this.arrivalThreshold) {
-          marker.setMap(null);
-          this.spotMarkers.delete(id);
-
-          this.lastStatus = `到達「${marker.getTitle()}」`;
-
-          // 全部景點完成 → 停止總計時
-          if (this.spotMarkers.size === 0) {
-            if (this.insideStartTime) {
-              this.totalStaySeconds += (Date.now() - this.insideStartTime) / 1000;
-              this.insideStartTime = null;
-            }
-
-            const m = Math.floor(this.totalStaySeconds / 60);
-            const s = Math.floor(this.totalStaySeconds % 60);
-
-            alert(`🎉 全部景點完成！\n總停留時間：${m} 分 ${s} 秒`);
-          }
-        }
-      }
-    }
-  },
-
-  mounted() {
-    const boot = () => this.initMap();
-    if (window.google && google.maps) boot();
-    else {
-      const t = setInterval(() => {
-        if (window.google && google.maps) { clearInterval(t); boot(); }
-      }, 200);
-    }
-  }
-});
-</script>
-</body>
-</html>
+function initMap() {
+map = new google.maps.Map(document.getElementById('map'), {
+center: { lat: 24.056348, lng: 120.432589 },
+zoom: 15,
+disableDefaultUI: false
