@@ -1,54 +1,52 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>鹿港景點計時地圖</title>
-<style>
-html, body {
-height: 100%; margin: 0; padding: 0;
-}
-#map {
-width: 100%; height: 100%; position: absolute; top: 0; left: 0;
-}
-#timerBox {
-position: fixed;
-top: 20px;
-left: 50%;
-transform: translateX(-50%);
-background: rgba(255,255,255,0.9);
-padding: 10px 20px;
-border-radius: 12px;
-font-size: 20px;
-font-weight: bold;
-z-index: 9999;
-box-shadow: 0 0 10px rgba(0,0,0,0.2);
-}
-</style>
-<script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>鹿港景點計時地圖</title>
+  <style>
+    html, body {
+      height: 100%; margin: 0; padding: 0;
+    }
+    #map {
+      width: 100%; height: 100%; position: absolute; top: 0; left: 0;
+    }
+    #timerBox {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255,255,255,0.9);
+      padding: 10px 20px;
+      border-radius: 12px;
+      font-size: 20px;
+      font-weight: bold;
+      z-index: 9999;
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
+    }
+  </style>
+  <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY"></script>
 </head>
 <body>
-<div id="timerBox">已花費時間：<span id="timer">00:00:00</span></div>
-<div id="map"></div>
-
+  <div id="timerBox">已花費時間：<span id="timer">00:00:00</span></div>
+  <div id="map"></div>
 
 <script>
 // 景點資料
 const locations = [
-{ name: "玻璃館", lat: 24.068667, lng: 120.395437 },
-{ name: "鹿港老街", lat: 24.056348, lng: 120.432589 },
-{ name: "鹿港龍山寺", lat: 24.0504, lng: 120.4349 },
-{ name: "鹿港天后宮", lat: 24.059338, lng: 120.431380 },
-{ name: "玻璃媽祖廟", lat: 24.069118, lng: 120.394715 },
-{ name: "桂花巷藝術村", lat: 24.055848, lng: 120.431928 },
-{ name: "臺灣玻璃館", lat: 24.068970, lng: 120.394912 },
-{ name: "鹿港民俗文物館", lat: 24.054200, lng: 120.436306 },
-{ name: "九曲巷", lat: 24.0535, lng: 120.4350 },
-{ name: "十宜樓", lat: 24.0535, lng: 120.4353 },
-{ name: "鹿港意樓", lat: 24.0529, lng: 120.4353 },
-{ name: "摸乳巷", lat: 24.051817, lng: 120.432231 }
+  { name: "玻璃館", lat: 24.068667, lng: 120.395437 },
+  { name: "鹿港老街", lat: 24.056348, lng: 120.432589 },
+  { name: "鹿港龍山寺", lat: 24.0504, lng: 120.4349 },
+  { name: "鹿港天后宮", lat: 24.059338, lng: 120.431380 },
+  { name: "玻璃媽祖廟", lat: 24.069118, lng: 120.394715 },
+  { name: "桂花巷藝術村", lat: 24.055848, lng: 120.431928 },
+  { name: "臺灣玻璃館", lat: 24.068970, lng: 120.394912 },
+  { name: "鹿港民俗文物館", lat: 24.054200, lng: 120.436306 },
+  { name: "九曲巷", lat: 24.0535, lng: 120.4350 },
+  { name: "十宜樓", lat: 24.0535, lng: 120.4353 },
+  { name: "鹿港意樓", lat: 24.0529, lng: 120.4353 },
+  { name: "摸乳巷", lat: 24.051817, lng: 120.432231 }
 ];
-
 
 let map;
 let userMarker = null;
@@ -56,9 +54,119 @@ let startTime = null;
 let timerInterval = null;
 let remainingLocations = new Set(locations.map(loc => loc.name));
 
-
 function initMap() {
-map = new google.maps.Map(document.getElementById('map'), {
-center: { lat: 24.056348, lng: 120.432589 },
-zoom: 15,
-disableDefaultUI: false
+  map = new google.maps.Map(document.getElementById('map'), {
+    center: { lat: 24.056348, lng: 120.432589 },
+    zoom: 15,
+    disableDefaultUI: false
+  });
+
+  // 標記景點
+  locations.forEach(loc => {
+    loc.marker = new google.maps.Marker({
+      position: { lat: loc.lat, lng: loc.lng },
+      map,
+      title: loc.name
+    });
+  });
+
+  // 啟動定位
+  if (navigator.geolocation) {
+    navigator.geolocation.watchPosition(onLocationUpdate, onLocationError, {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 10000
+    });
+  } else {
+    alert("你的瀏覽器不支援定位功能");
+  }
+}
+
+function onLocationError() {
+  alert("定位失敗，將以鹿港為中心顯示地圖");
+  map.setCenter({ lat: 24.056348, lng: 120.432589 });
+  map.setZoom(16);
+}
+
+function onLocationUpdate(position) {
+  const userPos = {
+    lat: position.coords.latitude,
+    lng: position.coords.longitude
+  };
+
+  if (!userMarker) {
+    userMarker = new google.maps.Marker({
+      position: userPos,
+      map,
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 8,
+        fillColor: "#FF0000",
+        fillOpacity: 1,
+        strokeWeight: 2
+      }
+    });
+
+    map.setCenter(userPos);
+    map.setZoom(18);
+
+    startTimer();
+  } else {
+    userMarker.setPosition(userPos);
+  }
+
+  checkProximity(userPos);
+}
+
+function checkProximity(userPos) {
+  locations.forEach(loc => {
+    if (remainingLocations.has(loc.name)) {
+      const distance = getDistance(userPos.lat, userPos.lng, loc.lat, loc.lng);
+      if (distance <= 5) {
+        loc.marker.setMap(null);
+        remainingLocations.delete(loc.name);
+
+        if (remainingLocations.size === 0) {
+          stopTimer();
+          alert("所有景點完成！總花費時間：" + document.getElementById("timer").textContent);
+        }
+      }
+    }
+  });
+}
+
+function getDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) ** 2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function startTimer() {
+  if (startTime) return;
+  startTime = Date.now();
+
+  timerInterval = setInterval(() => {
+    const diff = Date.now() - startTime;
+    document.getElementById('timer').textContent = formatTime(diff);
+  }, 1000);
+}
+
+function stopTimer() {
+  clearInterval(timerInterval);
+}
+
+function formatTime(ms) {
+  let sec = Math.floor(ms / 1000);
+  const h = String(Math.floor(sec / 3600)).padStart(2, '0');
+  sec %= 3600;
+  const m = String(Math.floor(sec / 60)).padStart(2, '0');
+  sec = String(sec % 60).padStart(2, '0');
+  return `${h}:${m}:${sec}`;
+}
+
+window.onload = initMap;
+</script>
+</body>
+</html>
