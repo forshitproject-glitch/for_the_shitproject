@@ -9,7 +9,6 @@
   html, body { height: 100%; margin: 0; padding: 0; }
   #app { height: 100%; display: flex; flex-direction: column; }
 
-  /* 上方 UI（不覆蓋地圖） */
   #uiBar{
     flex: 0 0 auto;
     padding: 10px 12px;
@@ -65,11 +64,10 @@
 
 <script>
 /* =====================
-   鹿港設定（你指定的）
+   鹿港設定
    ===================== */
 const LUKANG_CENTER = { lat: 24.056348, lng: 120.432589 };
-const LUKANG_RADIUS_M = 4200;   // ✅ 4200 公尺
-const DIM_OPACITY = 0.15;       // ✅ 明顯變亮，但不白
+const LUKANG_RADIUS_M = 4200;
 
 /* =====================
    景點資料
@@ -89,13 +87,8 @@ const locations = [
   { name: "摸乳巷", lat: 24.051817, lng: 120.432231 }
 ];
 
-let map;
-let spotlightPolygon = null;
-let userMarker = null;
-let watchId = null;
-
-let startTime = null;
-let timerInterval = null;
+let map, userMarker, watchId;
+let startTime = null, timerInterval = null;
 let geofenceEntered = false;
 let remainingLocations = new Set(locations.map(l => l.name));
 
@@ -103,13 +96,12 @@ function setStatus(msg) {
   document.getElementById("statusBox").textContent = "狀態：" + msg;
 }
 
-/* 產生圓形洞（不需 geometry） */
+/* 圓形近似 */
 function makeCirclePathApprox(center, radiusMeters, points = 240) {
   const R = 6378137;
   const lat0 = center.lat * Math.PI / 180;
   const lng0 = center.lng * Math.PI / 180;
   const d = radiusMeters / R;
-
   const path = [];
   for (let i = 0; i < points; i++) {
     const brng = (2 * Math.PI * i) / points;
@@ -121,12 +113,14 @@ function makeCirclePathApprox(center, radiusMeters, points = 240) {
       Math.sin(brng) * Math.sin(d) * Math.cos(lat0),
       Math.cos(d) - Math.sin(lat0) * Math.sin(lat)
     );
-    path.push({ lat: lat * 180/Math.PI, lng: lng * 180/Math.PI });
+    path.push({ lat: lat * 180 / Math.PI, lng: lng * 180 / Math.PI });
   }
   return path;
 }
 
-/* 外暗 + 鹿港挖洞（唯一亮度來源） */
+/* =====================
+   ⭐ 柔和鹿港聚光遮罩（唯一修改處）
+   ===================== */
 function buildSpotlight() {
   const outer = [
     { lat: 27.8, lng: 117.5 },
@@ -135,23 +129,45 @@ function buildSpotlight() {
     { lat: 20.0, lng: 117.5 }
   ];
 
-  const hole = makeCirclePathApprox(LUKANG_CENTER, LUKANG_RADIUS_M, 260);
+  const holeOuter = makeCirclePathApprox(LUKANG_CENTER, 5200).reverse();
+  const holeMid   = makeCirclePathApprox(LUKANG_CENTER, 4600).reverse();
+  const holeInner = makeCirclePathApprox(LUKANG_CENTER, 4200).reverse();
 
-  spotlightPolygon = new google.maps.Polygon({
+  new google.maps.Polygon({
     map,
-    paths: [outer, hole],
+    paths: [outer, holeOuter],
     fillColor: "#000",
-    fillOpacity: DIM_OPACITY, // ⭐ 真正控制亮度的地方
+    fillOpacity: 0.45,
+    strokeOpacity: 0,
+    clickable: false
+  });
+
+  new google.maps.Polygon({
+    map,
+    paths: [outer, holeMid],
+    fillColor: "#000",
+    fillOpacity: 0.30,
+    strokeOpacity: 0,
+    clickable: false
+  });
+
+  new google.maps.Polygon({
+    map,
+    paths: [outer, holeInner],
+    fillColor: "#000",
+    fillOpacity: 0.15,
     strokeOpacity: 0,
     clickable: false
   });
 }
 
-/* 初始化地圖 */
+/* =====================
+   地圖初始化
+   ===================== */
 function initMap() {
   map = new google.maps.Map(document.getElementById("map"), {
     center: LUKANG_CENTER,
-    zoom: 12   // 4200m 建議 zoom 12~13
+    zoom: 12
   });
 
   locations.forEach(loc => {
@@ -163,7 +179,7 @@ function initMap() {
   });
 
   buildSpotlight();
-  setStatus("地圖已載入：進入鹿港範圍後才會開始計時");
+  setStatus("地圖已載入：進入鹿港範圍後開始計時");
 }
 
 function recenterToLukang() {
@@ -171,10 +187,12 @@ function recenterToLukang() {
   map.setZoom(12);
 }
 
+/* =====================
+   定位與計時
+   ===================== */
 function startGeolocation() {
   document.getElementById("btnStart").disabled = true;
   document.getElementById("btnSkip").disabled = true;
-
   watchId = navigator.geolocation.watchPosition(onLocationUpdate);
 }
 
@@ -192,14 +210,12 @@ function onLocationUpdate(pos) {
       icon: {
         path: google.maps.SymbolPath.CIRCLE,
         scale: 8,
-        fillColor: "#FF0000",
+        fillColor: "#ff0000",
         fillOpacity: 1,
         strokeWeight: 2
       }
     });
-  } else {
-    userMarker.setPosition(p);
-  }
+  } else userMarker.setPosition(p);
 
   const dist = getDistance(p.lat, p.lng, LUKANG_CENTER.lat, LUKANG_CENTER.lng);
 
@@ -237,8 +253,7 @@ function getDistance(a,b,c,d){
 function startTimer(){
   startTime=Date.now();
   timerInterval=setInterval(()=>{
-    const t=Date.now()-startTime;
-    document.getElementById("timer").textContent=formatTime(t);
+    document.getElementById("timer").textContent=formatTime(Date.now()-startTime);
   },1000);
 }
 
@@ -255,6 +270,3 @@ window.onload = initMap;
 </script>
 </body>
 </html>
-
-
-
