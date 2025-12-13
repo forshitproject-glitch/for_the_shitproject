@@ -9,6 +9,7 @@
   html, body { height: 100%; margin: 0; padding: 0; }
   #app { height: 100%; display: flex; flex-direction: column; }
 
+  /* 上方 UI */
   #uiBar{
     flex: 0 0 auto;
     padding: 10px 12px;
@@ -18,6 +19,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 10px;
+    z-index: 10;
   }
   #uiBar .title { font-weight: 700; font-size: 16px; }
 
@@ -26,7 +28,7 @@
     font-size: 16px;
     padding: 6px 10px;
     border-radius: 10px;
-    background: rgba(245,245,245,1);
+    background: #f5f5f5;
   }
   #statusBox { font-size: 14px; color: #333; }
 
@@ -50,13 +52,13 @@
 <body>
 <div id="app">
   <div id="uiBar">
-    <div class="title">定位與計時</div>
+    <div class="title">鹿港定位計時</div>
     <button class="start-btn" id="btnStart" onclick="startGeolocation()">啟用定位</button>
     <button class="cancel-btn" id="btnSkip" onclick="skipGeolocation()">不啟用</button>
     <button class="reset-btn" onclick="recenterToLukang()">回到鹿港</button>
 
     <div id="timerBox">已花費時間：<span id="timer">00:00:00</span></div>
-    <div id="statusBox">狀態：尚未選擇定位模式</div>
+    <div id="statusBox">狀態：尚未開始</div>
   </div>
 
   <div id="map"></div>
@@ -70,58 +72,88 @@ const LUKANG_CENTER = { lat: 24.056348, lng: 120.432589 };
 const LUKANG_RADIUS_M = 4200;
 
 /* =====================
-   景點資料
+   景點資料（12 個）
    ===================== */
 const locations = [
   { name: "玻璃館", lat: 24.068667, lng: 120.395437 },
   { name: "鹿港老街", lat: 24.056348, lng: 120.432589 },
   { name: "鹿港龍山寺", lat: 24.0504, lng: 120.4349 },
-  { name: "鹿港天后宮", lat: 24.059338, lng: 120.431380 },
+  { name: "鹿港天后宮", lat: 24.059338, lng: 120.43138 },
   { name: "玻璃媽祖廟", lat: 24.069118, lng: 120.394715 },
   { name: "桂花巷藝術村", lat: 24.055848, lng: 120.431928 },
-  { name: "臺灣玻璃館", lat: 24.068970, lng: 120.394912 },
-  { name: "鹿港民俗文物館", lat: 24.054200, lng: 120.436306 },
-  { name: "九曲巷", lat: 24.0535, lng: 120.4350 },
+  { name: "臺灣玻璃館", lat: 24.06897, lng: 120.394912 },
+  { name: "鹿港民俗文物館", lat: 24.0542, lng: 120.436306 },
+  { name: "九曲巷", lat: 24.0535, lng: 120.435 },
   { name: "十宜樓", lat: 24.0535, lng: 120.4353 },
   { name: "鹿港意樓", lat: 24.0529, lng: 120.4353 },
   { name: "摸乳巷", lat: 24.051817, lng: 120.432231 }
 ];
 
-let map, userMarker, watchId;
-let startTime = null, timerInterval = null;
-let geofenceEntered = false;
-let remainingLocations = new Set(locations.map(l => l.name));
+let map;
+let userMarker = null;
+let watchId = null;
 
-function setStatus(msg) {
+let startTime = null;
+let timerInterval = null;
+let geofenceEntered = false;
+let remaining = new Set(locations.map(l => l.name));
+
+/* =====================
+   工具
+   ===================== */
+function setStatus(msg){
   document.getElementById("statusBox").textContent = "狀態：" + msg;
 }
 
-/* 圓形近似 */
-function makeCirclePathApprox(center, radiusMeters, points = 240) {
+function formatTime(ms){
+  let s = Math.floor(ms / 1000);
+  const h = String(Math.floor(s / 3600)).padStart(2,"0");
+  s %= 3600;
+  const m = String(Math.floor(s / 60)).padStart(2,"0");
+  const ss = String(s % 60).padStart(2,"0");
+  return `${h}:${m}:${ss}`;
+}
+
+function getDistance(lat1,lng1,lat2,lng2){
+  const R = 6371000;
+  const dLat = (lat2-lat1)*Math.PI/180;
+  const dLng = (lng2-lng1)*Math.PI/180;
+  const a =
+    Math.sin(dLat/2)**2 +
+    Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
+    Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+/* =====================
+   圓形 path（不靠 geometry）
+   ===================== */
+function makeCirclePath(center, radius, points=240){
   const R = 6378137;
-  const lat0 = center.lat * Math.PI / 180;
-  const lng0 = center.lng * Math.PI / 180;
-  const d = radiusMeters / R;
+  const lat0 = center.lat * Math.PI/180;
+  const lng0 = center.lng * Math.PI/180;
+  const d = radius / R;
   const path = [];
-  for (let i = 0; i < points; i++) {
-    const brng = (2 * Math.PI * i) / points;
+
+  for(let i=0;i<points;i++){
+    const b = 2*Math.PI*i/points;
     const lat = Math.asin(
-      Math.sin(lat0) * Math.cos(d) +
-      Math.cos(lat0) * Math.sin(d) * Math.cos(brng)
+      Math.sin(lat0)*Math.cos(d) +
+      Math.cos(lat0)*Math.sin(d)*Math.cos(b)
     );
     const lng = lng0 + Math.atan2(
-      Math.sin(brng) * Math.sin(d) * Math.cos(lat0),
-      Math.cos(d) - Math.sin(lat0) * Math.sin(lat)
+      Math.sin(b)*Math.sin(d)*Math.cos(lat0),
+      Math.cos(d)-Math.sin(lat0)*Math.sin(lat)
     );
-    path.push({ lat: lat * 180 / Math.PI, lng: lng * 180 / Math.PI });
+    path.push({ lat: lat*180/Math.PI, lng: lng*180/Math.PI });
   }
   return path;
 }
 
 /* =====================
-   ⭐ 柔和鹿港聚光遮罩（唯一修改處）
+   ⭐ 聚光遮罩（重點修改）
    ===================== */
-function buildSpotlight() {
+function buildSpotlight(){
   const outer = [
     { lat: 27.8, lng: 117.5 },
     { lat: 27.8, lng: 124.8 },
@@ -129,141 +161,124 @@ function buildSpotlight() {
     { lat: 20.0, lng: 117.5 }
   ];
 
-  const holeOuter = makeCirclePathApprox(LUKANG_CENTER, 5200).reverse();
-  const holeMid   = makeCirclePathApprox(LUKANG_CENTER, 4600).reverse();
-  const holeInner = makeCirclePathApprox(LUKANG_CENTER, 4200).reverse();
+  const holeFar   = makeCirclePath(LUKANG_CENTER, 6000).reverse();
+  const holeMid   = makeCirclePath(LUKANG_CENTER, 4800).reverse();
+  const holeInner = makeCirclePath(LUKANG_CENTER, 4200).reverse();
 
   new google.maps.Polygon({
     map,
-    paths: [outer, holeOuter],
-    fillColor: "#000",
-    fillOpacity: 0.45,
-    strokeOpacity: 0,
-    clickable: false
+    paths:[outer, holeFar],
+    fillColor:"#000",
+    fillOpacity:0.75,
+    strokeOpacity:0,
+    clickable:false
   });
 
   new google.maps.Polygon({
     map,
-    paths: [outer, holeMid],
-    fillColor: "#000",
-    fillOpacity: 0.30,
-    strokeOpacity: 0,
-    clickable: false
+    paths:[outer, holeMid],
+    fillColor:"#000",
+    fillOpacity:0.45,
+    strokeOpacity:0,
+    clickable:false
   });
 
   new google.maps.Polygon({
     map,
-    paths: [outer, holeInner],
-    fillColor: "#000",
-    fillOpacity: 0.15,
-    strokeOpacity: 0,
-    clickable: false
+    paths:[outer, holeInner],
+    fillColor:"#000",
+    fillOpacity:0.10,
+    strokeOpacity:0,
+    clickable:false
   });
 }
 
 /* =====================
    地圖初始化
    ===================== */
-function initMap() {
-  map = new google.maps.Map(document.getElementById("map"), {
-    center: LUKANG_CENTER,
-    zoom: 12
+function initMap(){
+  map = new google.maps.Map(document.getElementById("map"),{
+    center:LUKANG_CENTER,
+    zoom:12
   });
 
-  locations.forEach(loc => {
+  locations.forEach(loc=>{
     loc.marker = new google.maps.Marker({
-      position: { lat: loc.lat, lng: loc.lng },
+      position:{lat:loc.lat,lng:loc.lng},
       map,
-      title: loc.name
+      title:loc.name
     });
   });
 
   buildSpotlight();
-  setStatus("地圖已載入：進入鹿港範圍後開始計時");
+  setStatus("進入鹿港範圍後開始計時");
 }
 
-function recenterToLukang() {
+/* =====================
+   操作
+   ===================== */
+function recenterToLukang(){
   map.setCenter(LUKANG_CENTER);
   map.setZoom(12);
 }
 
-/* =====================
-   定位與計時
-   ===================== */
-function startGeolocation() {
+function startGeolocation(){
   document.getElementById("btnStart").disabled = true;
   document.getElementById("btnSkip").disabled = true;
-  watchId = navigator.geolocation.watchPosition(onLocationUpdate);
+  watchId = navigator.geolocation.watchPosition(onLocation);
 }
 
-function skipGeolocation() {
-  setStatus("已進入僅瀏覽模式");
+function skipGeolocation(){
+  setStatus("未啟用定位（僅瀏覽）");
 }
 
-function onLocationUpdate(pos) {
-  const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+function onLocation(pos){
+  const p = { lat:pos.coords.latitude, lng:pos.coords.longitude };
 
-  if (!userMarker) {
+  if(!userMarker){
     userMarker = new google.maps.Marker({
-      position: p,
+      position:p,
       map,
-      icon: {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 8,
-        fillColor: "#ff0000",
-        fillOpacity: 1,
-        strokeWeight: 2
+      icon:{
+        path:google.maps.SymbolPath.CIRCLE,
+        scale:8,
+        fillColor:"#ff0000",
+        fillOpacity:1,
+        strokeWeight:2
       }
     });
-  } else userMarker.setPosition(p);
+  } else {
+    userMarker.setPosition(p);
+  }
 
-  const dist = getDistance(p.lat, p.lng, LUKANG_CENTER.lat, LUKANG_CENTER.lng);
+  const d = getDistance(p.lat,p.lng,LUKANG_CENTER.lat,LUKANG_CENTER.lng);
 
-  if (!geofenceEntered && dist <= LUKANG_RADIUS_M) {
+  if(!geofenceEntered && d<=LUKANG_RADIUS_M){
     geofenceEntered = true;
-    startTimer();
-    setStatus("✅ 已進入鹿港範圍（開始計時）");
+    startTime = Date.now();
+    timerInterval = setInterval(()=>{
+      document.getElementById("timer").textContent =
+        formatTime(Date.now()-startTime);
+    },1000);
+
+    setStatus("已進入鹿港（開始計時）");
     map.setCenter(p);
     map.setZoom(16);
   }
 
-  if (geofenceEntered) checkProximity(p);
-}
-
-function checkProximity(p) {
-  locations.forEach(loc => {
-    if (!remainingLocations.has(loc.name)) return;
-    if (getDistance(p.lat, p.lng, loc.lat, loc.lng) <= 5) {
-      loc.marker.setMap(null);
-      remainingLocations.delete(loc.name);
-    }
-  });
-}
-
-function getDistance(a,b,c,d){
-  const R=6371000;
-  const dLat=(c-a)*Math.PI/180;
-  const dLon=(d-b)*Math.PI/180;
-  const x=Math.sin(dLat/2)**2+
-    Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*
-    Math.sin(dLon/2)**2;
-  return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
-}
-
-function startTimer(){
-  startTime=Date.now();
-  timerInterval=setInterval(()=>{
-    document.getElementById("timer").textContent=formatTime(Date.now()-startTime);
-  },1000);
-}
-
-function formatTime(ms){
-  let s=Math.floor(ms/1000);
-  const h=String(Math.floor(s/3600)).padStart(2,"0");
-  s%=3600;
-  const m=String(Math.floor(s/60)).padStart(2,"0");
-  const ss=String(s%60).padStart(2,"0");
-  return `${h}:${m}:${ss}`;
+  if(geofenceEntered){
+    locations.forEach(loc=>{
+      if(!remaining.has(loc.name)) return;
+      if(getDistance(p.lat,p.lng,loc.lat,loc.lng)<=5){
+        loc.marker.setMap(null);
+        remaining.delete(loc.name);
+        if(remaining.size===0){
+          clearInterval(timerInterval);
+          setStatus("🎉 全部景點完成！");
+        }
+      }
+    });
+  }
 }
 
 window.onload = initMap;
