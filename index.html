@@ -46,7 +46,7 @@ html, body {
 /* 地圖 */
 #map {
   width: 100%;
-  height: 420px;          /* 預設高度（Sites 手機安全） */
+  height: 420px;
   min-height: 420px;
 }
 </style>
@@ -69,10 +69,10 @@ html, body {
   </div>
 
   <div id="map"></div>
-
 </div>
 
 <script>
+/* ===== 基本設定 ===== */
 const LUKANG_CENTER = { lat:24.056348, lng:120.432589 };
 const LUKANG_RADIUS = 4200;
 
@@ -82,7 +82,7 @@ let timerStart, timerId;
 let isFullscreen = false;
 let originalHeight = 420;
 
-/* ===== ✅ 景點資料（新增）===== */
+/* ===== 景點資料 ===== */
 const SPOTS = [
   { name:"玻璃館", lat:24.068667, lng:120.395437 },
   { name:"鹿港老街", lat:24.056348, lng:120.432589 },
@@ -98,34 +98,32 @@ const SPOTS = [
   { name:"摸乳巷", lat:24.051817, lng:120.432231 }
 ];
 
-/* ===== ✅ 加入景點標記（新增）===== */
-function addSpots(){
-  SPOTS.forEach(spot => {
-    const marker = new google.maps.Marker({
-      position: { lat: spot.lat, lng: spot.lng },
-      map: map,
-      title: spot.name,
-      icon: {
-        url: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png"
-      }
-    });
-
-    const info = new google.maps.InfoWindow({
-      content: `<b>${spot.name}</b>`
-    });
-
-    marker.addListener("click", () => {
-      info.open(map, marker);
-    });
-  });
-}
-
 /* ===== UI ===== */
 function setStatus(t){
   document.getElementById("status").textContent = "狀態：" + t;
 }
 
-/* ===== 地圖工具 ===== */
+/* ===== 景點標點（重點修正）===== */
+function addSpots(){
+  const info = new google.maps.InfoWindow();
+
+  SPOTS.forEach(spot => {
+    const marker = new google.maps.Marker({
+      position: { lat: spot.lat, lng: spot.lng },
+      map: map,
+      title: spot.name,
+      zIndex: 9999, // ⭐ 強制在最上層
+      icon: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png"
+    });
+
+    marker.addListener("click", () => {
+      info.setContent(`<b>${spot.name}</b>`);
+      info.open(map, marker);
+    });
+  });
+}
+
+/* ===== 圓形工具 ===== */
 function circlePath(c,r,p=180){
   const R=6378137, lat=c.lat*Math.PI/180, lng=c.lng*Math.PI/180, d=r/R;
   const a=[];
@@ -156,10 +154,12 @@ function initMap(){
     paths:[outer,hole],
     fillColor:"#000",
     fillOpacity:0.75,
-    strokeOpacity:0
+    strokeOpacity:0,
+    zIndex:1 // ⭐ 遮罩壓低
   });
 
-  addSpots(); // ✅ 在地圖上加景點標點（新增）
+  // ⭐ 等地圖完全載入後再畫景點
+  google.maps.event.addListenerOnce(map,"idle",addSpots);
 
   setStatus("進入鹿港後開始計時");
 }
@@ -180,6 +180,7 @@ function onPos(p){
     userMarker=new google.maps.Marker({
       position:pos,
       map,
+      zIndex:10000,
       icon:{
         path:google.maps.SymbolPath.CIRCLE,
         scale:7,
@@ -216,7 +217,7 @@ function startTimer(){
   },1000);
 }
 
-/* ===== ⭐ 全螢幕地圖（Sites 專用做法）===== */
+/* ===== 全螢幕 ===== */
 function toggleFullscreen(){
   const mapDiv=document.getElementById("map");
   const btn=document.querySelector(".full-btn");
@@ -224,20 +225,14 @@ function toggleFullscreen(){
   if(!isFullscreen){
     originalHeight = mapDiv.offsetHeight;
     const uiHeight = document.getElementById("uiBar").offsetHeight;
-    const screenHeight = window.innerHeight;
-
-    mapDiv.style.height = (screenHeight - uiHeight) + "px";
-    mapDiv.style.minHeight = mapDiv.style.height;
+    mapDiv.style.height = (window.innerHeight - uiHeight) + "px";
     btn.textContent = "返回";
     isFullscreen = true;
-
     setTimeout(()=>google.maps.event.trigger(map,"resize"),300);
   } else {
     mapDiv.style.height = originalHeight + "px";
-    mapDiv.style.minHeight = originalHeight + "px";
     btn.textContent = "全螢幕地圖";
     isFullscreen = false;
-
     setTimeout(()=>google.maps.event.trigger(map,"resize"),300);
   }
 }
@@ -246,3 +241,6 @@ window.onload=initMap;
 </script>
 </body>
 </html>
+
+
+
