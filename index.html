@@ -82,6 +82,44 @@ let timerStart, timerId;
 let isFullscreen = false;
 let originalHeight = 420;
 
+/* ===== ✅ 景點資料（新增）===== */
+const SPOTS = [
+  { name:"玻璃館", lat:24.068667, lng:120.395437 },
+  { name:"鹿港老街", lat:24.056348, lng:120.432589 },
+  { name:"鹿港龍山寺", lat:24.0504, lng:120.4349 },
+  { name:"鹿港天后宮", lat:24.059338, lng:120.43138 },
+  { name:"玻璃媽祖廟", lat:24.069118, lng:120.394715 },
+  { name:"桂花巷藝術村", lat:24.055848, lng:120.431928 },
+  { name:"臺灣玻璃館", lat:24.06897, lng:120.394912 },
+  { name:"鹿港民俗文物館", lat:24.0542, lng:120.436306 },
+  { name:"九曲巷", lat:24.0535, lng:120.435 },
+  { name:"十宜樓", lat:24.0535, lng:120.4353 },
+  { name:"鹿港意樓", lat:24.0529, lng:120.4353 },
+  { name:"摸乳巷", lat:24.051817, lng:120.432231 }
+];
+
+/* ===== ✅ 加入景點標記（新增）===== */
+function addSpots(){
+  SPOTS.forEach(spot => {
+    const marker = new google.maps.Marker({
+      position: { lat: spot.lat, lng: spot.lng },
+      map: map,
+      title: spot.name,
+      icon: {
+        url: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png"
+      }
+    });
+
+    const info = new google.maps.InfoWindow({
+      content: `<b>${spot.name}</b>`
+    });
+
+    marker.addListener("click", () => {
+      info.open(map, marker);
+    });
+  });
+}
+
 /* ===== UI ===== */
 function setStatus(t){
   document.getElementById("status").textContent = "狀態：" + t;
@@ -120,6 +158,8 @@ function initMap(){
     fillOpacity:0.75,
     strokeOpacity:0
   });
+
+  addSpots(); // ✅ 在地圖上加景點標點（新增）
 
   setStatus("進入鹿港後開始計時");
 }
