@@ -78,7 +78,6 @@ html, body {
 const LUKANG_CENTER = { lat:24.056348, lng:120.432589 };
 const LUKANG_RADIUS = 4200;
 
-/* 鹿港景點 */
 const locations = [
   { name:"玻璃館", lat:24.068667, lng:120.395437 },
   { name:"鹿港老街", lat:24.056348, lng:120.432589 },
@@ -99,14 +98,13 @@ let entered = false;
 let timerStart, timerId;
 let isFullscreen = false;
 let originalHeight = 420;
-let locationMarkers = [];
 
 /* ================= UI ================= */
 function setStatus(t){
   document.getElementById("status").textContent = "狀態：" + t;
 }
 
-/* ================= 地圖工具 ================= */
+/* ================= 工具 ================= */
 function circlePath(c,r,p=180){
   const R=6378137, lat=c.lat*Math.PI/180, lng=c.lng*Math.PI/180, d=r/R;
   const a=[];
@@ -126,7 +124,6 @@ function initMap(){
     zoom:12
   });
 
-  /* 景點 Marker */
   locations.forEach(l=>{
     const m=new google.maps.Marker({
       position:{lat:l.lat,lng:l.lng},
@@ -139,10 +136,8 @@ function initMap(){
     });
 
     m.addListener("click",()=>info.open(map,m));
-    locationMarkers.push(m);
   });
 
-  /* 遮罩 */
   const outer=[
     {lat:30,lng:110},{lat:30,lng:140},
     {lat:10,lng:140},{lat:10,lng:110}
@@ -160,7 +155,7 @@ function initMap(){
   setStatus("進入鹿港後開始計時");
 }
 
-/* ================= 定位 ================= */
+/* ================= 定位（⭐ 小紅點） ================= */
 function startGeolocation(){
   navigator.geolocation.watchPosition(onPos);
 }
@@ -176,15 +171,19 @@ function onPos(p){
     userMarker=new google.maps.Marker({
       position:pos,
       map,
+      clickable:false,
       icon:{
         path:google.maps.SymbolPath.CIRCLE,
-        scale:7,
+        scale:4,              // ⭐ 小紅點大小
         fillColor:"#ff0000",
         fillOpacity:1,
-        strokeWeight:2
+        strokeColor:"#ffffff",
+        strokeWeight:1
       }
     });
-  } else userMarker.setPosition(pos);
+  } else {
+    userMarker.setPosition(pos);
+  }
 
   const d=google.maps.geometry.spherical.computeDistanceBetween(
     new google.maps.LatLng(pos),
