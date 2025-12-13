@@ -72,7 +72,7 @@ let isFullscreen = false;
 let originalHeight = 420;
 
 /* ===== 景點資料 ===== */
-const SPOTS = [
+const locations = [
   { name:"玻璃館", lat:24.068667, lng:120.395437 },
   { name:"鹿港老街", lat:24.056348, lng:120.432589 },
   { name:"鹿港龍山寺", lat:24.0504, lng:120.4349 },
@@ -87,27 +87,16 @@ const SPOTS = [
   { name:"摸乳巷", lat:24.051817, lng:120.432231 }
 ];
 
+let map, maskPolygon, userMarker;
+let entered = false;
+let timerStart = null;
+let timerId = null;
+let remaining = new Set(locations.map(l=>l.name));
+
+
 /* ===== UI ===== */
 function setStatus(t){
   document.getElementById("status").textContent = "狀態：" + t;
-}
-
-/* ===== 加入景點（使用 Google 預設紅色 Marker）===== */
-function addSpots(){
-  const info = new google.maps.InfoWindow();
-
-  SPOTS.forEach(spot => {
-    const marker = new google.maps.Marker({
-      position: { lat: spot.lat, lng: spot.lng },
-      map: map,
-      title: spot.name   // ⭐ 不設定 icon → 就是預設紅色
-    });
-
-    marker.addListener("click", () => {
-      info.setContent(`<b>${spot.name}</b>`);
-      info.open(map, marker);
-    });
-  });
 }
 
 /* ===== 圓形工具 ===== */
