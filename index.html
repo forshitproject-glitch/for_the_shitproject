@@ -1,78 +1,105 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>鹿港行程地圖</title>
 
 <style>
-html, body { margin:0; padding:0; }
-#app { width:100%; }
+  html, body { margin: 0; padding: 0; }
+  #app { width: 100%; }
 
-#uiBar{
-  padding:10px;
-  background:#fff;
-  box-shadow:0 2px 8px rgba(0,0,0,.25);
-  font-size:14px;
-  position:sticky;
-  top:0;
-  z-index:10;
-}
+  #uiBar{
+    padding: 10px;
+    background: #ffffff;
+    box-shadow: 0 2px 8px rgba(0,0,0,.25);
+    font-size: 14px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
 
-#uiBar button{
-  padding:8px 12px;
-  border-radius:8px;
-  border:none;
-  margin-right:6px;
-  margin-bottom:6px;
-}
+  #uiBar button{
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: none;
+    margin-right: 6px;
+    margin-bottom: 6px;
+    cursor: pointer;
+  }
 
-.start-btn{ background:#2e7d32; color:#fff; }
-.cancel-btn{ background:#e0e0e0; }
-.full-btn{ background:#1976d2; color:#fff; }
+  .start-btn { background:#2e7d32; color:#fff; }
+  .cancel-btn { background:#e0e0e0; }
+  .full-btn { background:#1976d2; color:#fff; }
+  .open-btn { background:#d32f2f; color:#fff; }
 
-#timerBox{ font-weight:bold; }
+  #timerBox { font-weight: bold; margin-top: 4px; }
+  #status { margin-top: 4px; }
 
-#map{
-  width:100%;
-  height:420px;
-  min-height:420px;
-}
+  #hintBox{
+    margin-top: 8px;
+    padding: 10px;
+    border-radius: 10px;
+    background: #fff3e0;
+    border: 1px solid #ffe0b2;
+    display: none; /* 只有在 Sites/iframe 顯示 */
+  }
+
+  #map{
+    width: 100%;
+    height: 420px;
+    min-height: 420px;
+  }
 </style>
 
+<!-- 你原本的 API key + geometry library -->
 <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC9yd5GeV-J0SHVtpkeHvtFfSryaavAKIE&libraries=geometry"></script>
 </head>
 
 <body>
 <div id="app">
-
   <div id="uiBar">
     <button class="start-btn" onclick="startGeolocation()">啟用定位</button>
     <button class="cancel-btn" onclick="skipGeolocation()">不啟用</button>
     <button class="full-btn" onclick="toggleFullscreen()">全螢幕地圖</button>
 
+    <!-- 方案A：在 iframe 內顯示「開啟完整版本」 -->
+    <button id="openFullBtn" class="open-btn" style="display:none;" onclick="openFullVersion()">
+      開啟完整版本（新分頁）
+    </button>
+
     <div id="timerBox">
       時間：<span id="timer">00:00:00</span>
     </div>
     <div id="status">狀態：尚未開始</div>
+
+    <div id="hintBox">
+      目前為「展示模式」（Google Sites 內嵌可能限制定位與地圖互動權限）。
+      若要使用定位與完整互動功能，請按上方 <b>「開啟完整版本（新分頁）」</b>。
+    </div>
   </div>
 
   <div id="map"></div>
 </div>
 
 <script>
-/* ===== 基本設定 ===== */
-const LUKANG_CENTER = { lat:24.056348, lng:120.432589 };
+/* =========================
+   ✅ 你要改的只有這個網址
+   ========================= */
+const FULL_URL = "https://forshitproject-glitch.github.io/for_the_shitproject/"; 
+// ↑ 改成你的 GitHub Pages 網址
+
+const LUKANG_CENTER = { lat: 24.056348, lng: 120.432589 };
 const LUKANG_RADIUS = 4200;
 
 let map, mask, userMarker;
 let entered = false;
-let timerStart, timerId;
+let timerStart, timerId = null;
 let isFullscreen = false;
 let originalHeight = 420;
 
-/* ===== 景點資料 ===== */
-const locations = [
+/* 景點資料（預設紅色 marker） */
+const SPOTS = [
   { name:"玻璃館", lat:24.068667, lng:120.395437 },
   { name:"鹿港老街", lat:24.056348, lng:120.432589 },
   { name:"鹿港龍山寺", lat:24.0504, lng:120.4349 },
@@ -87,88 +114,129 @@ const locations = [
   { name:"摸乳巷", lat:24.051817, lng:120.432231 }
 ];
 
-let map, maskPolygon, userMarker;
-let entered = false;
-let timerStart = null;
-let timerId = null;
-let remaining = new Set(locations.map(l=>l.name));
-
-
 /* ===== UI ===== */
 function setStatus(t){
   document.getElementById("status").textContent = "狀態：" + t;
 }
 
-/* ===== 圓形工具 ===== */
-function circlePath(c,r,p=180){
-  const R=6378137, lat=c.lat*Math.PI/180, lng=c.lng*Math.PI/180, d=r/R;
-  const a=[];
-  for(let i=0;i<p;i++){
-    const b=2*Math.PI*i/p;
-    const la=Math.asin(Math.sin(lat)*Math.cos(d)+Math.cos(lat)*Math.sin(d)*Math.cos(b));
-    const ln=lng+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(lat),Math.cos(d)-Math.sin(lat)*Math.sin(la));
-    a.push({lat:la*180/Math.PI,lng:ln*180/Math.PI});
+/* ===== 方案A：判斷是否在 iframe（Google Sites 嵌入） ===== */
+function isInIframe(){
+  try { return window.self !== window.top; } catch(e){ return true; }
+}
+
+function openFullVersion(){
+  window.open(FULL_URL, "_blank", "noopener");
+}
+
+/* ===== 圓形工具（你原本的遮罩洞） ===== */
+function circlePath(c, r, p=180){
+  const R = 6378137, lat = c.lat * Math.PI/180, lng = c.lng * Math.PI/180, d = r / R;
+  const a = [];
+  for(let i=0; i<p; i++){
+    const b = 2 * Math.PI * i / p;
+    const la = Math.asin(Math.sin(lat)*Math.cos(d) + Math.cos(lat)*Math.sin(d)*Math.cos(b));
+    const ln = lng + Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(lat), Math.cos(d)-Math.sin(lat)*Math.sin(la));
+    a.push({ lat: la*180/Math.PI, lng: ln*180/Math.PI });
   }
   return a;
 }
 
+/* ===== 景點標點（使用 Google 預設紅色 Marker） ===== */
+function addSpots(){
+  const info = new google.maps.InfoWindow();
+  SPOTS.forEach(spot => {
+    const marker = new google.maps.Marker({
+      position: { lat: spot.lat, lng: spot.lng },
+      map: map,
+      title: spot.name
+    });
+
+    marker.addListener("click", () => {
+      info.setContent(`<b>${spot.name}</b>`);
+      info.open(map, marker);
+    });
+  });
+}
+
 /* ===== 地圖初始化 ===== */
 function initMap(){
-  map = new google.maps.Map(document.getElementById("map"),{
+  map = new google.maps.Map(document.getElementById("map"), {
     center: LUKANG_CENTER,
     zoom: 12
   });
 
-  const outer=[
+  const outer = [
     {lat:30,lng:110},{lat:30,lng:140},
     {lat:10,lng:140},{lat:10,lng:110}
   ];
-  const hole=circlePath(LUKANG_CENTER,LUKANG_RADIUS).reverse();
+  const hole = circlePath(LUKANG_CENTER, LUKANG_RADIUS).reverse();
 
   mask = new google.maps.Polygon({
     map,
-    paths:[outer,hole],
-    fillColor:"#000",
-    fillOpacity:0.75,
-    strokeOpacity:0,
-    zIndex:1
+    paths: [outer, hole],
+    fillColor: "#000",
+    fillOpacity: 0.75,
+    strokeOpacity: 0,
+    zIndex: 1
   });
 
-  // ⭐ 地圖完成後再加景點（最穩）
-  google.maps.event.addListenerOnce(map,"idle",addSpots);
+  // 等地圖渲染完成再放標點（最穩）
+  google.maps.event.addListenerOnce(map, "idle", addSpots);
 
-  setStatus("進入鹿港後開始計時");
+  // 若在 Sites 內嵌：顯示提示 + 顯示「開啟完整版本」按鈕
+  if(isInIframe()){
+    document.getElementById("hintBox").style.display = "block";
+    document.getElementById("openFullBtn").style.display = "inline-block";
+    setStatus("展示模式：請用「開啟完整版本」體驗定位功能");
+  } else {
+    setStatus("進入鹿港後開始計時");
+  }
 }
 
 /* ===== 定位 ===== */
 function startGeolocation(){
-  navigator.geolocation.watchPosition(onPos);
+  if(!navigator.geolocation){
+    setStatus("此裝置不支援定位");
+    return;
+  }
+
+  setStatus("定位中…");
+  navigator.geolocation.watchPosition(onPos, onPosError, {
+    enableHighAccuracy: true,
+    maximumAge: 5000,
+    timeout: 10000
+  });
 }
 
 function skipGeolocation(){
   setStatus("未啟用定位");
 }
 
+function onPosError(err){
+  // Sites iframe 常見：權限被擋
+  setStatus("定位失敗（可能被嵌入環境限制），建議點「開啟完整版本」");
+}
+
 function onPos(p){
-  const pos={lat:p.coords.latitude,lng:p.coords.longitude};
+  const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
 
   if(!userMarker){
-    userMarker=new google.maps.Marker({
-      position:pos,
-      map,
-      title:"你的位置"
+    userMarker = new google.maps.Marker({
+      position: pos,
+      map: map,
+      title: "你的位置"
     });
   } else {
     userMarker.setPosition(pos);
   }
 
-  const d=google.maps.geometry.spherical.computeDistanceBetween(
+  const d = google.maps.geometry.spherical.computeDistanceBetween(
     new google.maps.LatLng(pos),
     new google.maps.LatLng(LUKANG_CENTER)
   );
 
-  if(!entered && d<=LUKANG_RADIUS){
-    entered=true;
+  if(!entered && d <= LUKANG_RADIUS){
+    entered = true;
     startTimer();
     map.setCenter(pos);
     map.setZoom(16);
@@ -178,33 +246,36 @@ function onPos(p){
 
 /* ===== 計時 ===== */
 function startTimer(){
-  timerStart=Date.now();
-  timerId=setInterval(()=>{
-    const s=Math.floor((Date.now()-timerStart)/1000);
-    const h=String(Math.floor(s/3600)).padStart(2,"0");
-    const m=String(Math.floor(s%3600/60)).padStart(2,"0");
-    const ss=String(s%60).padStart(2,"0");
-    document.getElementById("timer").textContent=`${h}:${m}:${ss}`;
-  },1000);
+  if(timerId) return; // 避免重複開多個 interval
+  timerStart = Date.now();
+  timerId = setInterval(() => {
+    const s = Math.floor((Date.now() - timerStart) / 1000);
+    const h = String(Math.floor(s / 3600)).padStart(2, "0");
+    const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+    const ss = String(s % 60).padStart(2, "0");
+    document.getElementById("timer").textContent = `${h}:${m}:${ss}`;
+  }, 1000);
 }
 
-/* ===== 全螢幕 ===== */
+/* ===== 全螢幕地圖（Sites 友善） ===== */
 function toggleFullscreen(){
-  const mapDiv=document.getElementById("map");
-  const btn=document.querySelector(".full-btn");
+  const mapDiv = document.getElementById("map");
+  const btn = document.querySelector(".full-btn");
 
   if(!isFullscreen){
     originalHeight = mapDiv.offsetHeight;
     const uiHeight = document.getElementById("uiBar").offsetHeight;
     mapDiv.style.height = (window.innerHeight - uiHeight) + "px";
+    mapDiv.style.minHeight = mapDiv.style.height;
     btn.textContent = "返回";
     isFullscreen = true;
-    setTimeout(()=>google.maps.event.trigger(map,"resize"),300);
+    setTimeout(() => google.maps.event.trigger(map, "resize"), 300);
   } else {
     mapDiv.style.height = originalHeight + "px";
+    mapDiv.style.minHeight = originalHeight + "px";
     btn.textContent = "全螢幕地圖";
     isFullscreen = false;
-    setTimeout(()=>google.maps.event.trigger(map,"resize"),300);
+    setTimeout(() => google.maps.event.trigger(map, "resize"), 300);
   }
 }
 
