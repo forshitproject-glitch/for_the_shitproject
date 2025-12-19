@@ -40,6 +40,9 @@ html, body {
 .cancel-btn { background:#e0e0e0; }
 .full-btn { background:#1976d2; color:#fff; }
 
+/* ===== 新增（不影響原樣式） ===== */
+.finish-btn { background:#d32f2f; color:#fff; }
+
 #timerBox {
   font-weight: bold;
 }
@@ -62,6 +65,9 @@ html, body {
     <button class="start-btn" onclick="startGeolocation()">啟用定位</button>
     <button class="cancel-btn" onclick="skipGeolocation()">不啟用</button>
     <button class="full-btn" onclick="toggleFullscreen()">全螢幕地圖</button>
+
+    <!-- ===== 新增：完成行程按鈕 ===== -->
+    <button class="finish-btn" onclick="finishTrip()">完成行程</button>
 
     <div id="timerBox">
       時間：<span id="timer">00:00:00</span>
@@ -98,6 +104,10 @@ let entered = false;
 let timerStart, timerId;
 let isFullscreen = false;
 let originalHeight = 420;
+
+/* ===== 新增：上傳用變數 ===== */
+let finalSeconds = 0;
+let uploaded = false;
 
 /* ================= UI ================= */
 function setStatus(t){
@@ -174,7 +184,7 @@ function onPos(p){
       clickable:false,
       icon:{
         path:google.maps.SymbolPath.CIRCLE,
-        scale:4,              // ⭐ 小紅點大小
+        scale:4,
         fillColor:"#ff0000",
         fillOpacity:1,
         strokeColor:"#ffffff",
@@ -231,6 +241,29 @@ function toggleFullscreen(){
     isFullscreen=false;
     setTimeout(()=>google.maps.event.trigger(map,"resize"),300);
   }
+}
+
+/* ===== 新增：完成行程並上傳時間 ===== */
+function finishTrip(){
+  if(!timerStart || uploaded) return;
+
+  clearInterval(timerId);
+  finalSeconds = Math.floor((Date.now() - timerStart) / 1000);
+  uploaded = true;
+
+  uploadResult();
+  setStatus("行程完成，時間已上傳");
+}
+
+function uploadResult(){
+  fetch("https://script.google.com/macros/s/AKfycbwyfOZCtoaouSGLlvQ4c46uGUMxcNrQ03ibIadG6U4BLo4aWcFBpkBy4WWEBYNVymmkmw/exec",{
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body:JSON.stringify({
+      time: document.getElementById("timer").textContent,
+      seconds: finalSeconds
+    })
+  });
 }
 
 window.onload=initMap;
