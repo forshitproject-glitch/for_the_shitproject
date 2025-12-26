@@ -40,7 +40,7 @@ html, body {
 .cancel-btn { background:#e0e0e0; }
 .full-btn { background:#1976d2; color:#fff; }
 
-/* ===== 新增（不影響原樣式） ===== */
+
 .finish-btn { background:#d32f2f; color:#fff; }
 
 #timerBox {
@@ -80,7 +80,7 @@ html, body {
 </div>
 
 <script>
-/* ================= 基本設定 ================= */
+/*  基本設定  */
 const LUKANG_CENTER = { lat:24.056348, lng:120.432589 };
 const LUKANG_RADIUS = 4200;
 
@@ -105,16 +105,16 @@ let timerStart, timerId;
 let isFullscreen = false;
 let originalHeight = 420;
 
-/* ===== 新增：上傳用變數 ===== */
+/* 上傳用  */
 let finalSeconds = 0;
 let uploaded = false;
 
-/* ================= UI ================= */
+/*  UI  */
 function setStatus(t){
   document.getElementById("status").textContent = "狀態：" + t;
 }
 
-/* ================= 工具 ================= */
+/*  工具  */
 function circlePath(c,r,p=180){
   const R=6378137, lat=c.lat*Math.PI/180, lng=c.lng*Math.PI/180, d=r/R;
   const a=[];
@@ -127,7 +127,7 @@ function circlePath(c,r,p=180){
   return a;
 }
 
-/* ================= 地圖初始化 ================= */
+/* 地圖初始化 */
 function initMap(){
   map=new google.maps.Map(document.getElementById("map"),{
     center:LUKANG_CENTER,
@@ -165,7 +165,7 @@ function initMap(){
   setStatus("進入鹿港後開始計時");
 }
 
-/* ================= 定位（⭐ 小紅點） ================= */
+/* 定位 */
 function startGeolocation(){
   navigator.geolocation.watchPosition(onPos);
 }
@@ -209,7 +209,7 @@ function onPos(p){
   }
 }
 
-/* ================= 計時 ================= */
+/* 計時  */
 function startTimer(){
   timerStart=Date.now();
   timerId=setInterval(()=>{
@@ -221,7 +221,7 @@ function startTimer(){
   },1000);
 }
 
-/* ================= 全螢幕 ================= */
+/*  全螢幕  */
 function toggleFullscreen(){
   const mapDiv=document.getElementById("map");
   const btn=document.querySelector(".full-btn");
@@ -243,7 +243,7 @@ function toggleFullscreen(){
   }
 }
 
-/* ===== 新增：完成行程並上傳時間 ===== */
+/* 完成行程並上傳時間 */
 function finishTrip(){
   if(!timerStart || uploaded) return;
 
