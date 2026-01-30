@@ -115,6 +115,7 @@ let userLatLng = null;
 let passedRoute = null;     // 白色已走
 let remainingRoute = null;  // 藍色未走
 let lastClosestIndex = 0;  // ⭐ 防止路線回跳
+let hasFix = false;
 
 /* 上傳用  */
 let finalSeconds = 0;
@@ -196,9 +197,16 @@ function initMap(){
 
 /* 定位 */
 function startGeolocation(){
-  navigator.geolocation.watchPosition(onPos, () => {
-  setStatus("定位失敗，請確認權限或 GPS");
-  });
+  navigator.geolocation.watchPosition(
+    onPos,
+    () => setStatus("定位失敗，請確認權限或 GPS"),
+    {
+      enableHighAccuracy: true, // ⭐ 強制 GPS
+      maximumAge: 0,            // ⭐ 不用快取
+      timeout: 10000            // ⭐ 10 秒內一定要回傳
+    }
+  );
+
 
 }
 
@@ -213,6 +221,7 @@ function onPos(p){
   };
 
   userLatLng = new google.maps.LatLng(pos.lat, pos.lng);
+  hasFix = true;
 
   if (!userMarker) {
     userMarker = new google.maps.Marker({
@@ -312,6 +321,11 @@ window.onload=initMap;
 async function onSpotSelected(e) {
   const idx = e.target.value;
   if (idx === "" || !userLatLng) return;
+  // ⭐ 一定要加在這裡（最前面）
+  if (!hasFix) {
+    alert("正在取得定位，請稍等幾秒後再選擇目的地");
+    return;
+  }
 
   const dest = locations[idx];
 
