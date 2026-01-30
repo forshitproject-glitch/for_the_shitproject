@@ -1,57 +1,28 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>鹿港行程地圖</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>導航追蹤測試</title>
 
 <style>
 html, body {
   margin: 0;
   padding: 0;
 }
-
-/* 整體 */
-#app {
-  width: 100%;
-}
-
-/* UI 區 */
-#uiBar {
-  padding: 10px;
-  background: #ffffff;
-  box-shadow: 0 2px 8px rgba(0,0,0,.25);
-  font-size: 14px;
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
-#uiBar button {
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: none;
-  margin-right: 6px;
-  margin-bottom: 6px;
-  cursor: pointer;
-}
-
-.start-btn { background:#2e7d32; color:#fff; }
-.cancel-btn { background:#e0e0e0; }
-.full-btn { background:#1976d2; color:#fff; }
-
-
-.finish-btn { background:#d32f2f; color:#fff; }
-
-#timerBox {
-  font-weight: bold;
-}
-
-/* 地圖 */
 #map {
   width: 100%;
-  height: 420px;
-  min-height: 420px;
+  height: 100vh;
+}
+#panel {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  background: #fff;
+  padding: 10px;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.3);
+  z-index: 10;
 }
 </style>
 
@@ -59,297 +30,192 @@ html, body {
 </head>
 
 <body>
-<div id="app">
 
-  <div id="uiBar">
-    <button class="start-btn" onclick="startGeolocation()">啟用定位</button>
-    <button class="cancel-btn" onclick="skipGeolocation()">不啟用</button>
-    <button class="full-btn" onclick="toggleFullscreen()">全螢幕地圖</button>
-    <select id="spotSelect" style="padding:6px;border-radius:6px;">
-      <option value="">選擇目的地</option>
-    </select>
-
-    <!-- ===== 新增：完成行程按鈕 ===== -->
-    <button class="finish-btn" onclick="finishTrip()">完成行程</button>
-
-    <div id="timerBox">
-      時間：<span id="timer">00:00:00</span>
-    </div>
-    <div id="status">狀態：尚未開始</div>
-  </div>
-
-  <div id="map"></div>
-
+<div id="panel">
+  <button onclick="startTracking()">開始定位</button>
+  <button onclick="drawTestRoute()">規劃路線</button>
+  <div id="status">尚未定位</div>
 </div>
 
+<div id="map"></div>
+
 <script>
-/*  基本設定  */
-
-const LUKANG_CENTER = { lat:24.056348, lng:120.432589 };
-const LUKANG_RADIUS = 4200;
-
-const locations = [
-  { name:"玻璃館", lat:24.068667, lng:120.395437 },
-  { name:"鹿港老街", lat:24.056348, lng:120.432589 },
-  { name:"鹿港龍山寺", lat:24.0504, lng:120.4349 },
-  { name:"鹿港天后宮", lat:24.059338, lng:120.43138 },
-  { name:"玻璃媽祖廟", lat:24.069118, lng:120.394715 },
-  { name:"桂花巷藝術村", lat:24.055848, lng:120.431928 },
-  { name:"臺灣玻璃館", lat:24.06897, lng:120.394912 },
-  { name:"鹿港民俗文物館", lat:24.0542, lng:120.436306 },
-  { name:"九曲巷", lat:24.0535, lng:120.435 },
-  { name:"十宜樓", lat:24.0535, lng:120.4353 },
-  { name:"鹿港意樓", lat:24.0529, lng:120.4353 },
-  { name:"摸乳巷", lat:24.051817, lng:120.432231 }
-];
-
-let map, mask, userMarker;
-let entered = false;
-let timerStart, timerId;
-let isFullscreen = false;
-let originalHeight = 420;
-
-/* 路線資料（提前宣告） */
-let routes;
+/* =====================
+   全域變數
+===================== */
+let map;
+let userMarker;
+let rawLatLng = null;
+let smoothLatLng = null;
 let userLatLng = null;
-let passedRoute = null;     // 白色已走
-let remainingRoute = null;  // 藍色未走
-let lastClosestIndex = 0;  // ⭐ 防止路線回跳
-let hasFix = false;
+let lastPosTime = 0;
 
-/* 上傳用  */
-let finalSeconds = 0;
-let uploaded = false;
+let passedRoute = null;
+let remainingRoute = null;
+let lastClosestIndex = 0;
 
-/*  UI  */
-function setStatus(t){
-  document.getElementById("status").textContent = "狀態：" + t;
-}
-
-/*  工具  */
-function circlePath(c,r,p=180){
-  const R=6378137, lat=c.lat*Math.PI/180, lng=c.lng*Math.PI/180, d=r/R;
-  const a=[];
-  for(let i=0;i<p;i++){
-    const b=2*Math.PI*i/p;
-    const la=Math.asin(Math.sin(lat)*Math.cos(d)+Math.cos(lat)*Math.sin(d)*Math.cos(b));
-    const ln=lng+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(lat),Math.cos(d)-Math.sin(lat)*Math.sin(la));
-    a.push({lat:la*180/Math.PI,lng:ln*180/Math.PI});
-  }
-  return a;
-}	
-
-function initSpotSelect() {
-  const select = document.getElementById("spotSelect");
-
-  locations.forEach((loc, index) => {
-    const opt = document.createElement("option");
-    opt.value = index;
-    opt.textContent = loc.name;
-    select.appendChild(opt);
-  });
-
-  select.addEventListener("change", onSpotSelected);
-}
-
-
-/* ======================
-   地圖初始化（此時 routes 一定存在）
-====================== */
-function initMap(){
-  map=new google.maps.Map(document.getElementById("map"),{
-    center:LUKANG_CENTER,
-    zoom:12
-  });
-
-  locations.forEach(l=>{
-    const m=new google.maps.Marker({
-      position:{lat:l.lat,lng:l.lng},
-      map:map,
-      title:l.name
-    });
-
-    const info=new google.maps.InfoWindow({
-      content:`<strong>${l.name}</strong>`
-    });
-
-    m.addListener("click",()=>info.open(map,m));
-  });
-
-  const outer=[
-    {lat:30,lng:110},{lat:30,lng:140},
-    {lat:10,lng:140},{lat:10,lng:110}
-  ];
-  const hole=circlePath(LUKANG_CENTER,LUKANG_RADIUS).reverse();
-
-  mask=new google.maps.Polygon({
-    map,
-    paths:[outer,hole],
-    fillColor:"#000",
-    fillOpacity:0.75,
-    strokeOpacity:0
-  });
-
-  setStatus("進入鹿港後開始計時");
-
-  initSpotSelect();
-}
-
-/* 定位 */
-function startGeolocation(){
-  navigator.geolocation.watchPosition(
-    onPos,
-    () => setStatus("定位失敗，請確認權限或 GPS"),
-    {
-      enableHighAccuracy: true, // ⭐ 強制 GPS
-      maximumAge: 0,            // ⭐ 不用快取
-      timeout: 10000            // ⭐ 10 秒內一定要回傳
-    }
-  );
-
-
-}
-
-function skipGeolocation(){
-  setStatus("未啟用定位（僅瀏覽）");
-}
-
-function onPos(p){
-  const pos = {
-    lat: p.coords.latitude,
-    lng: p.coords.longitude
-  };
-
-  userLatLng = new google.maps.LatLng(pos.lat, pos.lng);
-  hasFix = true;
-
-  if (!userMarker) {
-    userMarker = new google.maps.Marker({
-      position: pos,
-      map,
-      clickable: false,
-      icon: {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 4,
-        fillColor: "#ff0000",
-        fillOpacity: 1,
-        strokeColor: "#ffffff",
-        strokeWeight: 1
-      }
-    });
-  } else {
-    userMarker.setPosition(pos);
-  }
-
-  // ⭐ 每次位置更新就更新路線進度
-  updateRouteProgress();
-
-  // 原本進入鹿港的判斷照留
-  const d = google.maps.geometry.spherical.computeDistanceBetween(
-    userLatLng,
-    new google.maps.LatLng(LUKANG_CENTER)
-  );
-
-  if(!entered && d <= LUKANG_RADIUS){
-    entered = true;
-    startTimer();
-    map.setCenter(pos);
-    map.setZoom(16);
-    setStatus("已進入鹿港，開始計時");
-  }
-}
-
-/* 計時  */
-function startTimer(){
-  timerStart=Date.now();
-  timerId=setInterval(()=>{
-    const s=Math.floor((Date.now()-timerStart)/1000);
-    const h=String(Math.floor(s/3600)).padStart(2,"0");
-    const m=String(Math.floor(s%3600/60)).padStart(2,"0");
-    const ss=String(s%60).padStart(2,"0");
-    document.getElementById("timer").textContent=`${h}:${m}:${ss}`;
-  },1000);
-}
-
-/*  全螢幕  */
-function toggleFullscreen(){
-  const mapDiv=document.getElementById("map");
-  const btn=document.querySelector(".full-btn");
-
-  if(!isFullscreen){
-    originalHeight=mapDiv.offsetHeight;
-    const uiHeight=document.getElementById("uiBar").offsetHeight;
-    mapDiv.style.height=(window.innerHeight-uiHeight)+"px";
-    mapDiv.style.minHeight=mapDiv.style.height;
-    btn.textContent="返回";
-    isFullscreen=true;
-    setTimeout(()=>google.maps.event.trigger(map,"resize"),300);
-  }else{
-    mapDiv.style.height=originalHeight+"px";
-    mapDiv.style.minHeight=originalHeight+"px";
-    btn.textContent="全螢幕地圖";
-    isFullscreen=false;
-    setTimeout(()=>google.maps.event.trigger(map,"resize"),300);
-  }
-}
-
-/* 完成行程並上傳時間 */
-function finishTrip(){
-  if(!timerStart || uploaded) return;
-
-  clearInterval(timerId);
-  finalSeconds = Math.floor((Date.now() - timerStart) / 1000);
-  uploaded = true;
-
-  uploadResult();
-  setStatus("行程完成，時間已上傳");
-}
-
-function uploadResult(){
-  fetch("https://script.google.com/macros/s/AKfycbwyfOZCtoaouSGLlvQ4c46uGUMxcNrQ03ibIadG6U4BLo4aWcFBpkBy4WWEBYNVymmkmw/exec",{
-    method:"POST",
-    headers:{ "Content-Type":"application/json" },
-    body:JSON.stringify({
-      time: document.getElementById("timer").textContent,
-      seconds: finalSeconds
-    })
+/* =====================
+   地圖初始化
+===================== */
+function initMap() {
+  map = new google.maps.Map(document.getElementById("map"), {
+    center: { lat: 24.056348, lng: 120.432589 },
+    zoom: 16,
   });
 }
 
+window.onload = initMap;
 
-window.onload=initMap;
-async function onSpotSelected(e) {
-  const idx = e.target.value;
-  if (idx === "" || !userLatLng) return;
-  // ⭐ 一定要加在這裡（最前面）
-  if (!hasFix) {
-    alert("正在取得定位，請稍等幾秒後再選擇目的地");
+/* =====================
+   啟動定位
+===================== */
+function startTracking() {
+  if (!navigator.geolocation) {
+    alert("不支援定位");
     return;
   }
 
-  const dest = locations[idx];
+  navigator.geolocation.watchPosition(onPos, onErr, {
+    enableHighAccuracy: true,
+    maximumAge: 0,
+    timeout: 10000
+  });
+
+  document.getElementById("status").textContent = "定位中...";
+}
+
+/* =====================
+   定位核心（Google Maps 體感）
+===================== */
+function onPos(p) {
+  const now = Date.now();
+
+  // 精度太差不要
+  if (p.coords.accuracy > 50) return;
+
+  const raw = new google.maps.LatLng(
+    p.coords.latitude,
+    p.coords.longitude
+  );
+
+  // 跳點過濾
+  if (rawLatLng && now - lastPosTime < 1200) {
+    const d = google.maps.geometry.spherical.computeDistanceBetween(
+      rawLatLng,
+      raw
+    );
+    if (d > 30) return;
+  }
+
+  rawLatLng = raw;
+  lastPosTime = now;
+
+  // 平滑濾波
+  if (!smoothLatLng) {
+    smoothLatLng = raw;
+  } else {
+    const alpha = 0.2;
+    smoothLatLng = new google.maps.LatLng(
+      smoothLatLng.lat() * (1 - alpha) + raw.lat() * alpha,
+      smoothLatLng.lng() * (1 - alpha) + raw.lng() * alpha
+    );
+  }
+
+  userLatLng = smoothLatLng;
+
+  updateUserMarker();
+  updateRouteProgress();
+
+  map.panTo(userLatLng);
+
+  document.getElementById("status").textContent =
+    `定位中（誤差 ${Math.round(p.coords.accuracy)}m）`;
+}
+
+/* =====================
+   使用者 Marker
+===================== */
+function updateUserMarker() {
+  if (!userMarker) {
+    userMarker = new google.maps.Marker({
+      position: userLatLng,
+      map,
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 6,
+        fillColor: "#4285F4",
+        fillOpacity: 1,
+        strokeColor: "#fff",
+        strokeWeight: 2
+      }
+    });
+  } else {
+    userMarker.setPosition(userLatLng);
+  }
+}
+
+/* =====================
+   路線測試（鹿港）
+===================== */
+async function drawTestRoute() {
+  if (!userLatLng) {
+    alert("請先定位");
+    return;
+  }
+
+  const destination = { lat: 24.059338, lng: 120.43138 };
 
   const { Route } = google.maps;
 
-  const request = {
+  const result = await Route.computeRoutes({
     origin: userLatLng,
-    destination: { lat: dest.lat, lng: dest.lng },
-    fields: ["path"],
-  };
+    destination,
+    fields: ["path"]
+  });
 
-  const result = await Route.computeRoutes(request);
   const path = result.routes[0].path;
 
   drawRoute(path);
 }
 
+/* =====================
+   畫路線
+===================== */
+function drawRoute(path) {
+  if (passedRoute) passedRoute.setMap(null);
+  if (remainingRoute) remainingRoute.setMap(null);
+
+  lastClosestIndex = 0;
+
+  passedRoute = new google.maps.Polyline({
+    path: [],
+    map,
+    strokeColor: "#FFFFFF",
+    strokeOpacity: 0.7,
+    strokeWeight: 10,
+    zIndex: 1
+  });
+
+  remainingRoute = new google.maps.Polyline({
+    path,
+    map,
+    strokeColor: "#1A73E8",
+    strokeOpacity: 1,
+    strokeWeight: 6,
+    zIndex: 2
+  });
+}
+
+/* =====================
+   路線進度更新
+===================== */
 function updateRouteProgress() {
   if (!remainingRoute || !passedRoute || !userLatLng) return;
 
   const path = remainingRoute.getPath();
   if (path.getLength() === 0) return;
 
-  let closestIndex = 0;
+  let closestIndex = lastClosestIndex;
   let minDist = Infinity;
 
   path.forEach((p, i) => {
@@ -363,47 +229,21 @@ function updateRouteProgress() {
     }
   });
 
-  // ⭐ 防止路線回跳
   closestIndex = Math.max(closestIndex, lastClosestIndex);
   lastClosestIndex = closestIndex;
 
-  const passed = path.getArray().slice(0, closestIndex + 1);
-  const remaining = path.getArray().slice(closestIndex);
-
-  passedRoute.setPath(passed);
-  remainingRoute.setPath(remaining);
-
-  // ⭐ 抵達終點
-  if (remaining.length < 3) {
-    setStatus("已抵達目的地 🎉");
-  }
+  passedRoute.setPath(path.getArray().slice(0, closestIndex + 1));
+  remainingRoute.setPath(path.getArray().slice(closestIndex));
 }
 
-function drawRoute(path) {
-  if (passedRoute) passedRoute.setMap(null);
-  if (remainingRoute) remainingRoute.setMap(null);
-
-  // 已走過（白色）
-  passedRoute = new google.maps.Polyline({
-    path: [],
-    map,
-    strokeColor: "#FFFFFF",
-    strokeOpacity: 0.7,
-    strokeWeight: 10,
-    zIndex: 1
-  });
-
-  // 尚未走（藍色）
-  remainingRoute = new google.maps.Polyline({
-    path: path,
-    map,
-    strokeColor: "#1A73E8",
-    strokeOpacity: 1,
-    strokeWeight: 6,
-    zIndex: 2
-  });
+/* =====================
+   錯誤
+===================== */
+function onErr(e) {
+  console.error(e);
+  document.getElementById("status").textContent = "定位失敗";
 }
 </script>
+
 </body>
 </html>
-
