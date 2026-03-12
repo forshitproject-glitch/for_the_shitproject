@@ -6,17 +6,8 @@
 <title>鹿港行程地圖 - 高精準追蹤版</title>
 
 <style>
-html, body {
-  margin: 0;
-  padding: 0;
-}
-
-/* 整體 */
-#app {
-  width: 100%;
-}
-
-/* UI 區 */
+html, body { margin: 0; padding: 0; }
+#app { width: 100%; }
 #uiBar {
   padding: 10px;
   background: #ffffff;
@@ -26,7 +17,6 @@ html, body {
   top: 0;
   z-index: 10;
 }
-
 #uiBar button {
   padding: 8px 12px;
   border-radius: 8px;
@@ -36,23 +26,13 @@ html, body {
   cursor: pointer;
   font-weight: bold;
 }
-
 .start-btn { background:#2e7d32; color:#fff; }
-.stop-btn { background:#d32f2f; color:#fff; } /* 新增停止狀態樣式 */
+.stop-btn { background:#d32f2f; color:#fff; }
 .cancel-btn { background:#e0e0e0; }
 .full-btn { background:#1976d2; color:#fff; }
 .finish-btn { background:#d32f2f; color:#fff; }
-
-#timerBox {
-  font-weight: bold;
-}
-
-/* 地圖 */
-#map {
-  width: 100%;
-  height: 420px;
-  min-height: 420px;
-}
+#timerBox { font-weight: bold; }
+#map { width: 100%; height: 420px; min-height: 420px; }
 </style>
 
 <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC9yd5GeV-J0SHVtpkeHvtFfSryaavAKIE&libraries=geometry,routes"></script>
@@ -60,29 +40,22 @@ html, body {
 
 <body>
 <div id="app">
-
   <div id="uiBar">
     <button id="geoBtn" class="start-btn" onclick="toggleGeolocation()">啟用定位</button>
     <button class="cancel-btn" onclick="skipGeolocation()">不啟用</button>
     <button class="full-btn" onclick="toggleFullscreen()">全螢幕地圖</button>
     <select id="spotSelect" style="padding:6px;border-radius:6px;">
       <option value="">選擇目的地</option>
-    </select>
-
+    </select>+
     <button class="finish-btn" onclick="finishTrip()">完成行程</button>
-
-    <div id="timerBox">
-      時間：<span id="timer">00:00:00</span>
-    </div>
+    <div id="timerBox">時間：<span id="timer">00:00:00</span></div>
     <div id="status">狀態：尚未開始</div>
   </div>
-
   <div id="map"></div>
-
 </div>
 
 <script>
-/* 基本設定  */
+/* 基本設定 */
 const LUKANG_CENTER = { lat:24.056348, lng:120.432589 };
 const LUKANG_RADIUS = 4200;
 
@@ -101,31 +74,25 @@ const locations = [
   { name:"摸乳巷", lat:24.051817, lng:120.432231 }
 ];
 
-let map, mask, userMarker, accuracyCircle;
+let map, mask, userMarker, accuracyCircle, destinationMarker;
 let entered = false;
 let timerStart, timerId;
 let isFullscreen = false;
 let originalHeight = 420;
 
-/* 定位控制變數 */
+/* 定位與導航控制變數 */
 let autoUpdateInterval = null;
 let wakeLock = null;
 let userLatLng = null;
 let hasFix = false;
-
-/* 路線進度變數 */
 let passedRoute = null;     
 let remainingRoute = null;  
 let lastClosestIndex = 0;   
 let uploaded = false;
 let finalSeconds = 0;
 
-/* UI 狀態更新 */
-function setStatus(t){
-  document.getElementById("status").textContent = "狀態：" + t;
-}
+function setStatus(t){ document.getElementById("status").textContent = "狀態：" + t; }
 
-/* 工具：產生圓形路徑（用於遮罩） */
 function circlePath(c,r,p=180){
   const R=6378137, lat=c.lat*Math.PI/180, lng=c.lng*Math.PI/180, d=r/R;
   const a=[];
@@ -138,18 +105,6 @@ function circlePath(c,r,p=180){
   return a;
 }
 
-function initSpotSelect() {
-  const select = document.getElementById("spotSelect");
-  locations.forEach((loc, index) => {
-    const opt = document.createElement("option");
-    opt.value = index;
-    opt.textContent = loc.name;
-    select.appendChild(opt);
-  });
-  select.addEventListener("change", onSpotSelected);
-}
-
-/* 初始化地圖 */
 function initMap(){
   map=new google.maps.Map(document.getElementById("map"),{
     center:LUKANG_CENTER,
@@ -158,63 +113,103 @@ function initMap(){
   });
 
   locations.forEach(l=>{
-    const m=new google.maps.Marker({
-      position:{lat:l.lat,lng:l.lng},
-      map:map,
-      title:l.name
-    });
+    const m=new google.maps.Marker({ position:{lat:l.lat,lng:l.lng}, map:map, title:l.name });
     const info=new google.maps.InfoWindow({ content:`<strong>${l.name}</strong>` });
     m.addListener("click",()=>info.open(map,m));
   });
 
   const outer=[{lat:30,lng:110},{lat:30,lng:140},{lat:10,lng:140},{lat:10,lng:110}];
   const hole=circlePath(LUKANG_CENTER,LUKANG_RADIUS).reverse();
-
-  mask=new google.maps.Polygon({
-    map,
-    paths:[outer,hole],
-    fillColor:"#000",
-    fillOpacity:0.6,
-    strokeOpacity:0,
-    clickable: false
-  });
+  mask=new google.maps.Polygon({ map, paths:[outer,hole], fillColor:"#000", fillOpacity:0.6, strokeOpacity:0, clickable: false });
 
   setStatus("進入鹿港後開始計時");
   initSpotSelect();
 }
 
-/* --- 定位控制開關 --- */
-async function toggleGeolocation() {
-  const btn = document.getElementById("geoBtn");
-  
-  if (autoUpdateInterval) {
-    // 停止定位
-    clearInterval(autoUpdateInterval);
-    autoUpdateInterval = null;
-    releaseWakeLock();
-    btn.textContent = "啟用定位";
-    btn.className = "start-btn";
-    setStatus("定位已停止");
-  } else {
-    // 啟用定位
-    btn.textContent = "停止定位追蹤";
-    btn.className = "stop-btn";
-    await requestWakeLock();
-    
-    performLocationUpdate(); // 立即執行第一次
-    autoUpdateInterval = setInterval(performLocationUpdate, 5000); // 每 5 秒強制更新
-    setStatus("定位啟動中...");
+function initSpotSelect() {
+  const select = document.getElementById("spotSelect");
+  locations.forEach((loc, index) => {
+    const opt = document.createElement("option");
+    opt.value = index; opt.textContent = loc.name;
+    select.appendChild(opt);
+  });
+  select.addEventListener("change", onSpotSelected);
+}
+
+/* --- 改進後的路線選擇函式 --- */
+async function onSpotSelected(e) {
+  const idx = e.target.value;
+  if (idx === "" || !userLatLng) {
+    if (!userLatLng) alert("請先點擊『啟用定位』獲取目前位置。");
+    return;
+  }
+  if (!hasFix) { alert("正在精確定位中，請稍候..."); return; }
+
+  const dest = locations[idx];
+  const { Route } = google.maps;
+  const request = {
+    origin: userLatLng,
+    destination: { lat: dest.lat, lng: dest.lng },
+    travelMode: google.maps.TravelMode.WALKING,
+    fields: ["path"],
+  };
+
+  try {
+    const result = await Route.computeRoutes(request);
+    const path = result.routes[0].path;
+    lastClosestIndex = 0; 
+    drawImprovedRoute(path, dest);
+  } catch (err) {
+    alert("路線計算失敗，可能距離過遠。");
   }
 }
 
-function skipGeolocation(){
-  setStatus("未啟用定位（僅瀏覽）");
+function drawImprovedRoute(path, destInfo) {
+  if (passedRoute) passedRoute.setMap(null);
+  if (remainingRoute) remainingRoute.setMap(null);
+  if (destinationMarker) destinationMarker.setMap(null);
+
+  passedRoute = new google.maps.Polyline({
+    path: [], map, strokeColor: "#FFFFFF", strokeOpacity: 0.8, strokeWeight: 10, zIndex: 1
+  });
+
+  remainingRoute = new google.maps.Polyline({
+    path: path, map, strokeColor: "#1A73E8", strokeOpacity: 1, strokeWeight: 6, zIndex: 2
+  });
+
+  destinationMarker = new google.maps.Marker({
+    position: { lat: destInfo.lat, lng: destInfo.lng },
+    map: map,
+    label: { text: destInfo.name, color: "white", fontWeight: "bold" },
+    animation: google.maps.Animation.DROP
+  });
+
+  //  自動縮放視角：讓起點與終點都在畫面上
+  const bounds = new google.maps.LatLngBounds();
+  bounds.extend(userLatLng);
+  bounds.extend({ lat: destInfo.lat, lng: destInfo.lng });
+  map.fitBounds(bounds, 50);
+
+  setStatus(`導航至：${destInfo.name}`);
 }
 
-/* --- 核心定位執行 --- */
+/* --- 定位更新邏輯 --- */
+async function toggleGeolocation() {
+  const btn = document.getElementById("geoBtn");
+  if (autoUpdateInterval) {
+    clearInterval(autoUpdateInterval); autoUpdateInterval = null;
+    releaseWakeLock(); btn.textContent = "啟用定位"; btn.className = "start-btn";
+    setStatus("定位已停止");
+  } else {
+    btn.textContent = "停止定位追蹤"; btn.className = "stop-btn";
+    await requestWakeLock();
+    performLocationUpdate();
+    autoUpdateInterval = setInterval(performLocationUpdate, 5000);
+  }
+}
+
 function performLocationUpdate() {
   if (!navigator.geolocation) return;
-
   navigator.geolocation.getCurrentPosition(
     (p) => {
       const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
@@ -222,224 +217,52 @@ function performLocationUpdate() {
       userLatLng = new google.maps.LatLng(pos.lat, pos.lng);
       hasFix = true;
 
-      // 更新或建立使用者標記 (紅點)
       if (!userMarker) {
-        userMarker = new google.maps.Marker({
-          position: pos,
-          map,
-          clickable: false,
-          zIndex: 999,
-          icon: {
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 6,
-            fillColor: "#ff0000",
-            fillOpacity: 1,
-            strokeColor: "#ffffff",
-            strokeWeight: 2
-          }
-        });
-      } else {
-        userMarker.setPosition(pos);
-      }
+        userMarker = new google.maps.Marker({ position: pos, map, zIndex: 999, icon: { path: google.maps.SymbolPath.CIRCLE, scale: 6, fillColor: "#ff0000", fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 2 } });
+      } else { userMarker.setPosition(pos); }
 
-      // 更新或建立誤差圓圈
       if (!accuracyCircle) {
-        accuracyCircle = new google.maps.Circle({
-          map,
-          center: pos,
-          radius: accuracy,
-          fillColor: "#1a73e8",
-          fillOpacity: 0.15,
-          strokeColor: "#1a73e8",
-          strokeOpacity: 0.4,
-          strokeWeight: 1,
-          clickable: false
-        });
-      } else {
-        accuracyCircle.setCenter(pos);
-        accuracyCircle.setRadius(accuracy);
-      }
+        accuracyCircle = new google.maps.Circle({ map, center: pos, radius: accuracy, fillColor: "#1a73e8", fillOpacity: 0.15, strokeColor: "#1a73e8", strokeOpacity: 0.4, strokeWeight: 1, clickable: false });
+      } else { accuracyCircle.setCenter(pos); accuracyCircle.setRadius(accuracy); }
 
-      // 更新路線進度
       updateRouteProgress();
 
-      // 進入鹿港範圍判斷
-      const d = google.maps.geometry.spherical.computeDistanceBetween(
-        userLatLng,
-        new google.maps.LatLng(LUKANG_CENTER)
-      );
-
+      const d = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, new google.maps.LatLng(LUKANG_CENTER));
       if(!entered && d <= LUKANG_RADIUS){
-        entered = true;
-        startTimer();
-        map.panTo(pos);
-        map.setZoom(16);
+        entered = true; startTimer(); map.panTo(pos); map.setZoom(16);
         setStatus("已進入鹿港區域，開始計時！");
-      } else if (entered) {
-        setStatus(`定位更新中 (誤差: ${Math.round(accuracy)}m)`);
       }
     },
-    (err) => console.warn("定位獲取失敗: " + err.message),
-    { enableHighAccuracy: true, maximumAge: 0, timeout: 4500 }
+    null, { enableHighAccuracy: true, maximumAge: 0, timeout: 4500 }
   );
-}
-
-/* --- 螢幕常亮控制 --- */
-async function requestWakeLock() {
-  try {
-    if ('wakeLock' in navigator) {
-      wakeLock = await navigator.wakeLock.request('screen');
-    }
-  } catch (err) {
-    console.warn("無法鎖定螢幕常亮");
-  }
-}
-
-function releaseWakeLock() {
-  if (wakeLock) {
-    wakeLock.release();
-    wakeLock = null;
-  }
-}
-
-/* 切換分頁回來立即同步 */
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === 'visible' && autoUpdateInterval) {
-    performLocationUpdate();
-  }
-});
-
-/* 計時器功能 */
-function startTimer(){
-  if(timerId) return;
-  timerStart=Date.now();
-  timerId=setInterval(()=>{
-    const s=Math.floor((Date.now()-timerStart)/1000);
-    const h=String(Math.floor(s/3600)).padStart(2,"0");
-    const m=String(Math.floor(s%3600/60)).padStart(2,"0");
-    const ss=String(s%60).padStart(2,"0");
-    document.getElementById("timer").textContent=`${h}:${m}:${ss}`;
-  },1000);
-}
-
-/* 全螢幕切換 */
-function toggleFullscreen(){
-  const mapDiv=document.getElementById("map");
-  const btn=document.querySelector(".full-btn");
-
-  if(!isFullscreen){
-    originalHeight=mapDiv.offsetHeight;
-    const uiHeight=document.getElementById("uiBar").offsetHeight;
-    mapDiv.style.height=(window.innerHeight-uiHeight)+"px";
-    mapDiv.style.minHeight=mapDiv.style.height;
-    btn.textContent="返回";
-    isFullscreen=true;
-  }else{
-    mapDiv.style.height=originalHeight+"px";
-    mapDiv.style.minHeight=originalHeight+"px";
-    btn.textContent="全螢幕地圖";
-    isFullscreen=false;
-  }
-  setTimeout(()=>google.maps.event.trigger(map,"resize"),300);
-}
-
-/* 完成行程 */
-function finishTrip(){
-  if(!timerStart || uploaded) return;
-  clearInterval(timerId);
-  finalSeconds = Math.floor((Date.now() - timerStart) / 1000);
-  uploaded = true;
-  uploadResult();
-  setStatus("行程完成，時間已上傳 ✅");
-  releaseWakeLock();
-  if(autoUpdateInterval) clearInterval(autoUpdateInterval);
-}
-
-function uploadResult(){
-  fetch("https://script.google.com/macros/s/AKfycbwyfOZCtoaouSGLlvQ4c46uGUMxcNrQ03ibIadG6U4BLo4aWcFBpkBy4WWEBYNVymmkmw/exec",{
-    method:"POST",
-    headers:{ "Content-Type":"application/json" },
-    body:JSON.stringify({
-      time: document.getElementById("timer").textContent,
-      seconds: finalSeconds
-    })
-  });
-}
-
-async function onSpotSelected(e) {
-  const idx = e.target.value;
-  if (idx === "" || !userLatLng) return;
-  if (!hasFix) {
-    alert("正在取得初始定位，請稍等...");
-    return;
-  }
-
-  const dest = locations[idx];
-  const { Route } = google.maps;
-  const request = {
-    origin: userLatLng,
-    destination: { lat: dest.lat, lng: dest.lng },
-    fields: ["path"],
-  };
-
-  const result = await Route.computeRoutes(request);
-  const path = result.routes[0].path;
-  lastClosestIndex = 0; // 重置路徑索引
-  drawRoute(path);
 }
 
 function updateRouteProgress() {
   if (!remainingRoute || !passedRoute || !userLatLng) return;
-  const path = remainingRoute.getPath();
-  if (path.getLength() === 0) return;
+  const fullPath = remainingRoute.getPath().getArray();
+  if (fullPath.length === 0) return;
 
-  let closestIndex = 0;
-  let minDist = Infinity;
-
-  path.forEach((p, i) => {
-    const d = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, p);
-    if (d < minDist) {
-      minDist = d;
-      closestIndex = i;
-    }
+  let closestIndex = 0; let minDist = Infinity;
+  fullPath.forEach((point, i) => {
+    const dist = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, point);
+    if (dist < minDist) { minDist = dist; closestIndex = i; }
   });
 
   closestIndex = Math.max(closestIndex, lastClosestIndex);
   lastClosestIndex = closestIndex;
-
-  const passed = path.getArray().slice(0, closestIndex + 1);
-  const remaining = path.getArray().slice(closestIndex);
-
-  passedRoute.setPath(passed);
-  remainingRoute.setPath(remaining);
-
-  if (remaining.length < 3) {
-    setStatus("已抵達目的地 🎉");
-  }
+  passedRoute.setPath(fullPath.slice(0, closestIndex + 1));
+  remainingRoute.setPath(fullPath.slice(closestIndex));
+  if (fullPath.length - closestIndex < 3) setStatus("已抵達目的地");
 }
 
-function drawRoute(path) {
-  if (passedRoute) passedRoute.setMap(null);
-  if (remainingRoute) remainingRoute.setMap(null);
-
-  passedRoute = new google.maps.Polyline({
-    path: [],
-    map,
-    strokeColor: "#FFFFFF",
-    strokeOpacity: 0.7,
-    strokeWeight: 8,
-    zIndex: 1
-  });
-
-  remainingRoute = new google.maps.Polyline({
-    path: path,
-    map,
-    strokeColor: "#1A73E8",
-    strokeOpacity: 1,
-    strokeWeight: 6,
-    zIndex: 2
-  });
-}
+/* 其他功能 */
+async function requestWakeLock() { try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {} }
+function releaseWakeLock() { if (wakeLock) { wakeLock.release(); wakeLock = null; } }
+function startTimer(){ if(timerId) return; timerStart=Date.now(); timerId=setInterval(()=>{ const s=Math.floor((Date.now()-timerStart)/1000); const h=String(Math.floor(s/3600)).padStart(2,"0"); const m=String(Math.floor(s%3600/60)).padStart(2,"0"); const ss=String(s%60).padStart(2,"0"); document.getElementById("timer").textContent=`${h}:${m}:${ss}`; },1000); }
+function toggleFullscreen(){ const mapDiv=document.getElementById("map"); const btn=document.querySelector(".full-btn"); if(!isFullscreen){ originalHeight=mapDiv.offsetHeight; const uiHeight=document.getElementById("uiBar").offsetHeight; mapDiv.style.height=(window.innerHeight-uiHeight)+"px"; mapDiv.style.minHeight=mapDiv.style.height; btn.textContent="返回"; isFullscreen=true; }else{ mapDiv.style.height=originalHeight+"px"; mapDiv.style.minHeight=originalHeight+"px"; btn.textContent="全螢幕地圖"; isFullscreen=false; } setTimeout(()=>google.maps.event.trigger(map,"resize"),300); }
+function skipGeolocation(){ setStatus("未啟用定位（僅瀏覽）"); }
+function finishTrip(){ if(!timerStart || uploaded) return; clearInterval(timerId); finalSeconds = Math.floor((Date.now() - timerStart) / 1000); uploaded = true; uploadResult(); setStatus("行程完成，時間已上傳 "); releaseWakeLock(); if(autoUpdateInterval) clearInterval(autoUpdateInterval); }
+function uploadResult(){ fetch("https://script.google.com/macros/s/AKfycbwyfOZCtoaouSGLlvQ4c46uGUMxcNrQ03ibIadG6U4BLo4aWcFBpkBy4WWEBYNVymmkmw/exec",{ method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ time: document.getElementById("timer").textContent, seconds: finalSeconds }) }); }
 
 window.onload=initMap;
 </script>
