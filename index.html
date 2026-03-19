@@ -136,7 +136,7 @@ function initSpotSelect() {
   select.addEventListener("change", onSpotSelected);
 }
 
-/* --- 改進後的路線選擇函式 --- */
+/*  路線選擇  */
 async function onSpotSelected(e) {
   const idx = e.target.value;
   if (idx === "" || !userLatLng) {
@@ -184,7 +184,7 @@ function drawImprovedRoute(path, destInfo) {
     animation: google.maps.Animation.DROP
   });
 
-  //  自動縮放視角：讓起點與終點都在畫面上
+  //  縮放視角(自動)
   const bounds = new google.maps.LatLngBounds();
   bounds.extend(userLatLng);
   bounds.extend({ lat: destInfo.lat, lng: destInfo.lng });
