@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>鹿港行程地圖 - 高精準追蹤版</title>
+<title>具遊戲性質之旅遊網頁</title>
 
 <style>
 html, body { margin: 0; padding: 0; }
@@ -140,7 +140,7 @@ function initSpotSelect() {
 async function onSpotSelected(e) {
   const idx = e.target.value;
   if (idx === "" || !userLatLng) {
-    if (!userLatLng) alert("請先點擊『啟用定位』獲取目前位置。");
+    if (!userLatLng) alert("請先點擊『啟用定位』獲取目前位置");
     return;
   }
   if (!hasFix) { alert("正在精確定位中，請稍候..."); return; }
@@ -230,7 +230,7 @@ function performLocationUpdate() {
       const d = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, new google.maps.LatLng(LUKANG_CENTER));
       if(!entered && d <= LUKANG_RADIUS){
         entered = true; startTimer(); map.panTo(pos); map.setZoom(16);
-        setStatus("已進入鹿港區域，開始計時！");
+        setStatus("已進入鹿港區域，開始計時");
       }
     },
     null, { enableHighAccuracy: true, maximumAge: 0, timeout: 4500 }
